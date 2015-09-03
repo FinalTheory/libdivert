@@ -10,7 +10,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall \
 
 include_directories(./include)
 
-set(LIB_SOURCE_FILES divert.c divert_ipfw.c print_data.c print_packet.c queue.c dump_packet.c dump_packet.h)
+set(LIB_SOURCE_FILES divert.c divert_ipfw.c print_data.c print_packet.c queue.c dump_packet.c packet_buffer.c)
 set(DEMO_SOURCE_FILES demo.c)
 
 add_library(divert SHARED ${LIB_SOURCE_FILES})

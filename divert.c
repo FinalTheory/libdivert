@@ -144,7 +144,6 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
  * compare two packet_info_t structure
  */
 static int compare_packet(void *packet_info1, void *packet_info2) {
-    
 }
 
 static int should_drop(void *data, void *args) {
