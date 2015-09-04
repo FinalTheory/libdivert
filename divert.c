@@ -4,16 +4,16 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <arpa/inet.h>
 #include <errno.h>
 
-divert_t *divert_create(int port_number, char *errmsg) {
+divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
     errmsg[0] = 0;
     divert_t *divert_handle;
     divert_handle = malloc(sizeof(divert_t));
     memset(divert_handle, 0, sizeof(divert_t));
 
+    divert_handle->flags = flags;
     divert_handle->divert_port.sin_family = AF_INET;
     divert_handle->divert_port.sin_port = htons(port_number);
     divert_handle->divert_port.sin_addr.s_addr = 0;
@@ -23,12 +23,20 @@ divert_t *divert_create(int port_number, char *errmsg) {
 
     // set default timeout
     divert_handle->timeout = PACKET_TIME_OUT;
+    divert_handle->thread_buffer_size = PACKET_BUFFER_SIZE;
 
     return divert_handle;
 }
 
-int divert_set_buffer_size(divert_t *handle, size_t bufsize) {
+// TODO: 设计一个新的函数来设置缓存buffer的大小
+
+int divert_set_data_buffer_size(divert_t *handle, size_t bufsize) {
     handle->bufsize = bufsize;
+    return 1;
+}
+
+int divert_set_thread_buffer_size(divert_t *handle, size_t bufsize) {
+    handle->thread_buffer_size = bufsize;
     return 1;
 }
 
@@ -56,11 +64,8 @@ int divert_set_pcap_filter(divert_t *divert_handle, char *pcap_filter, char *err
     return 0;
 }
 
-int divert_activate(divert_t *divert_handle, char *errmsg) {
-    errmsg[0] = 0;
-    /*
-     * first init pcap metadata
-     */
+static int divert_init_pcap(divert_t *divert_handle, char *errmsg) {
+
     pcap_t *pcap_handle;
     char *dev = PKTAP_IFNAME;
 
@@ -73,8 +78,9 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
 
     /*
      * must be called before pcap_activate()
+     * do not need error handling for pcap_set_immediate_mode()
+     * and pcap_set_want_pktap(), because they just set flags
      */
-    // TODO: 这里要做错误处理！
     pcap_set_immediate_mode(pcap_handle, 1);
     pcap_set_want_pktap(pcap_handle, 1);
     if (divert_handle->bufsize > 0) {
@@ -104,41 +110,83 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
 
     /* backup the handler of pcap */
     divert_handle->pcap_handle = pcap_handle;
+    /* read the information of pcap handler */
     divert_handle->bpf_fd = pcap_handle->fd;
     divert_handle->bpf_buffer = pcap_handle->buffer;
     divert_handle->bufsize = (size_t)pcap_handle->bufsize;
+    /* allocate thread buffer to store labeled packet */
+    divert_handle->thread_buffer = malloc(sizeof(packet_buf_t));
+    if (divert_buf_init(divert_handle->thread_buffer,
+                        divert_handle->thread_buffer_size, errmsg) != 0) {
+        return PCAP_BUFFER_FAILURE;
+    }
 
-    /*
-     * then init divert socket
-     */
+    return 0;
+}
+
+static int divert_init_divert_socket(divert_t *divert_handle, char *errmsg) {
+
     divert_handle->divert_fd = socket(AF_INET, SOCK_RAW, IPPROTO_DIVERT);
     if (divert_handle->divert_fd == -1) {
         sprintf(errmsg, "Couldn't open a divert socket");
         return DIVERT_FAILURE;
     }
 
-    // set socket to non-blocking
-    if (fcntl(divert_handle->divert_fd, F_SETFL, O_NONBLOCK) != 0) {
-        sprintf(errmsg, "Couldn't set socket to non-blocking mode");
-        return DIVERT_FAILURE;
+    /*
+     * set socket to non-blocking
+     * this is used only when we use the extended info
+     */
+    if (divert_handle->flags & DIVERT_FLAG_WITH_APPLE_EXTHDR) {
+        if (fcntl(divert_handle->divert_fd, F_SETFL, O_NONBLOCK) != 0) {
+            sprintf(errmsg, "Couldn't set socket to non-blocking mode");
+            return DIVERT_FAILURE;
+        }
     }
 
+    // bind divert socket to port
     if (bind(divert_handle->divert_fd, (struct sockaddr *)&divert_handle->divert_port,
              sizeof(struct sockaddr_in)) != 0) {
         sprintf(errmsg, "Couldn't bind divert socket to port");
         return DIVERT_FAILURE;
     }
 
+    // setup firewall to redirect all traffic to divert socket
     if (ipfw_setup(divert_handle, errmsg) != 0) {
         return FIREWALL_FAILURE;
     }
 
+    // finally allocate memory for divert buffer
     divert_handle->divert_buffer = malloc((size_t)divert_handle->bufsize);
     memset(divert_handle->divert_buffer, 0, (size_t)divert_handle->bufsize);
 
     return 0;
 }
 
+int divert_activate(divert_t *divert_handle, char *errmsg) {
+    // clean error message
+    errmsg[0] = 0;
+    int status = 0;
+
+    /*
+     * first init pcap metadata
+     */
+    if (divert_handle->flags & DIVERT_FLAG_WITH_APPLE_EXTHDR) {
+        status = divert_init_pcap(divert_handle, errmsg);
+        if (status != 0) {
+            return status;
+        }
+    }
+
+    /*
+     * then init divert socket
+     */
+    status = divert_init_divert_socket(divert_handle, errmsg);
+    if (status != 0) {
+        return status;
+    }
+
+    return 0;
+}
 
 /*
  * compare two packet_info_t structure
@@ -251,6 +299,10 @@ void divert_loop(divert_t *divert_handle, int count,
 
 }
 
+void divert_working_thread(divert_t *handle) {
+
+}
+
 void divert_loop_stop(divert_t *handle) {
     handle->is_looping = 0;
 }
@@ -261,12 +313,18 @@ int divert_clean(divert_t *divert_handle, char *errmsg) {
     if (ipfw_delete(divert_handle, errmsg) != 0) {
         return FIREWALL_FAILURE;
     }
-    // close the pcap handler
-    pcap_close(divert_handle->pcap_handle);
+
     // close the divert socket and free the buffer
     close(divert_handle->divert_fd);
     if (divert_handle->divert_buffer != NULL) {
         free(divert_handle->divert_buffer);
     }
+
+    if (divert_handle->flags & DIVERT_FLAG_WITH_APPLE_EXTHDR) {
+        // close the pcap handler
+        pcap_close(divert_handle->pcap_handle);
+        divert_buf_clean(divert_handle->thread_buffer, errmsg);
+    }
+
     return 0;
 }

@@ -8,18 +8,30 @@
 #include "pcap/pcap.h"
 #include "pcap/pcap-int.h"
 #include "queue.h"
+#include "packet_buffer.h"
 
 /*
  * flags for error handling
  */
-#define PCAP_FAILURE -1
-#define DIVERT_FAILURE -2
-#define FIREWALL_FAILURE -3
+#define PCAP_FAILURE        -1
+#define DIVERT_FAILURE      -2
+#define FIREWALL_FAILURE    -3
+#define PCAP_BUFFER_FAILURE -4
 
 /*
- * default packet timeout
+ * default packet parameters
  */
-#define PACKET_TIME_OUT 15
+#define PACKET_TIME_OUT     15
+#define PACKET_BUFFER_SIZE  4096
+
+/*
+ * flags to control divert behaviour
+ * you can choose to use extended information
+ * or just divert the raw IP packets
+ */
+
+#define DIVERT_FLAG_WITH_APPLE_EXTHDR (1)
+
 
 /*
  * flags for packet buffer and error handling
@@ -35,6 +47,8 @@ typedef void (*divert_callback_t)(void *args, u_char *packet);
 typedef void (*divert_error_handler_t)(u_int32_t errflags);
 
 typedef struct {
+    u_int32_t flags;
+
     /*
      * file descriptors
      */
@@ -60,6 +74,9 @@ typedef struct {
      */
     pcap_t *pcap_handle;            // handle for pcap structure
     queue_t *bpf_queue;             // handle for queue structure
+    packet_buf_t *thread_buffer;    // buffer for labeled packet
+    size_t thread_buffer_size;      // buffer size of labeled packet
+
     /*
      * statics information
      */
@@ -96,9 +113,11 @@ typedef struct {
     struct ip *ip_data;
 } packet_info_t;
 
-divert_t *divert_create(int port_number, char *errmsg);
+divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg);
 
-int divert_set_buffer_size(divert_t *handle, size_t bufsize);
+int divert_set_data_buffer_size(divert_t *handle, size_t bufsize);
+
+int divert_set_thread_buffer_size(divert_t *handle, size_t bufsize);
 
 int divert_set_pcap_filter(divert_t *divert_handle, char *pcap_filter, char *errmsg);
 

@@ -16,5 +16,12 @@ typedef struct {
     pthread_mutex_t *mutex;/* buffer mutex lock */
 } packet_buf_t;
 
+int divert_buf_init(packet_buf_t *sp, size_t n, char *errmsg);
+
+void divert_buf_clean(packet_buf_t *sp, char *errmsg);
+
+void divert_buf_insert(packet_buf_t *sp, void *item);
+
+void *divert_buf_remove(packet_buf_t *sp);
 
 #endif //DIVERT_PACKET_BUFFER_H
