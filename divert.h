@@ -36,13 +36,14 @@
 /*
  * flags for packet buffer and error handling
  */
-#define DIVERT_NEW_PACKET           (1)
-#define DIVERT_ERROR_BPF_INVALID    (1 << 1)
-#define DIVERT_ERROR_BPF_NODATA     (1 << 2)
-#define DIVERT_ERROR_NOINFO         (1 << 3)
-#define DIVERT_STOP_LOOP            (1 << 4)
+#define DIVERT_RAW_BPF_PACKET       (1)
+#define DIVERT_RAW_IP_PACKET        (1 << 1)
+#define DIVERT_ERROR_BPF_INVALID    (1 << 2)
+#define DIVERT_ERROR_BPF_NODATA     (1 << 3)
+#define DIVERT_ERROR_NOINFO         (1 << 4)
+#define DIVERT_STOP_LOOP            (1 << 5)
 
-typedef void (*divert_callback_t)(void *args, u_char *packet);
+typedef void (*divert_callback_t)(void *args, u_char *packet, u_int64_t flags);
 
 typedef void (*divert_error_handler_t)(u_int32_t errflags);
 
@@ -85,9 +86,12 @@ typedef struct {
     u_int64_t num_missed;
 
     /*
-     * other info
+     * other information
      */
-    divert_error_handler_t err_handle;
+
+    divert_error_handler_t err_handler;
+    divert_callback_t callback;
+    void *callback_args;
     volatile u_char is_looping;
 
 } divert_t;
@@ -130,7 +134,7 @@ int divert_set_pcap_filter(divert_t *divert_handle, char *pcap_filter, char *err
 int divert_activate(divert_t *divert_handle, char *errmsg);
 
 void divert_loop(divert_t *divert_handle, int count,
-                 divert_callback_t callback, u_char *args);
+                 divert_callback_t callback, void *args);
 
 void divert_loop_stop(divert_t *handle);
 

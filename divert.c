@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <pthread.h>
 
 divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
     errmsg[0] = 0;
@@ -27,8 +28,6 @@ divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
 
     return divert_handle;
 }
-
-// TODO: 设计一个新的函数来设置缓存buffer的大小
 
 int divert_set_data_buffer_size(divert_t *handle, size_t bufsize) {
     handle->bufsize = bufsize;
@@ -191,7 +190,18 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
 /*
  * compare two packet_info_t structure
  */
-static int compare_packet(void *packet_info1, void *packet_info2) {
+static int compare_packet(void *p1, void *p2) {
+    // the entire packet should be equal
+    // IP header, TCP header and data payload
+    packet_info_t *pkt1 = (packet_info_t *)p1;
+    packet_info_t *pkt2 = (packet_info_t *)p2;
+    size_t  len1 = ntohs(pkt1->ip_data->ip_len);
+    size_t  len2 = ntohs(pkt2->ip_data->ip_len);
+    if (len1 == len2 &&
+        memcmp(pkt1->ip_data, pkt2->ip_data, len1) == 0) {
+        return 1;
+    }
+    return 0;
 }
 
 static int should_drop(void *data, void *args) {
@@ -205,12 +215,31 @@ static int should_drop(void *data, void *args) {
     }
 }
 
+static void *divert_thread(void *arg) {
+    packet_info_t *packet;
+    divert_t *handle = (divert_t *)arg;
+    packet_buf_t *buf = handle->thread_buffer;
+    divert_callback_t callback = handle->callback;
+    void *callback_args = handle->callback_args;
+    while (handle->is_looping) {
+        packet = divert_buf_remove(buf);
+        if (packet->time_stamp & DIVERT_STOP_LOOP) {
+            free(packet);
+            break;
+        }
+        callback(callback_args, packet->raw_data, packet->time_stamp);
+        free(packet->raw_data);
+        free(packet);
+    }
+    return NULL;
+}
+
 void divert_loop(divert_t *divert_handle, int count,
-                 divert_callback_t callback, u_char *args) {
+                 divert_callback_t callback, void *args) {
+    pthread_t divert_thread_handle;
     ssize_t num_divert, num_bpf;
     queue_node_t *node;
     void *time_info = malloc(2 * sizeof(u_int64_t));
-    u_char *payload;
     char errmsg[PCAP_ERRBUF_SIZE];
 
     struct sockaddr sin;
@@ -219,9 +248,13 @@ void divert_loop(divert_t *divert_handle, int count,
     packet_hdrs_t packet_hdrs;
     packet_info_t packet_info;
 
+    /* store the callback function and arguments into divert handle */
+    divert_handle->callback = callback;
+    divert_handle->callback_args = args;
     ((u_int64_t *)time_info)[0] = divert_handle->timeout;
 
     divert_handle->is_looping = 1;
+    pthread_create(&divert_thread_handle, NULL, divert_thread, divert_handle);
     while (divert_handle->is_looping) {
         // returns a packet of BPF structure
         num_bpf = read(divert_handle->bpf_fd,
@@ -232,7 +265,7 @@ void divert_loop(divert_t *divert_handle, int count,
         // things in the queue are pointers to packet_info_t
         if (num_bpf > 0) {
             // first dump the headers of this packet
-            payload = divert_dump_bpf_raw_data(divert_handle->bpf_buffer, errmsg, &packet_hdrs);
+            divert_dump_bpf_raw_data(divert_handle->bpf_buffer, errmsg, &packet_hdrs);
             if (packet_hdrs.size_ip) {
                 size_t bpf_len = BPF_WORDALIGN(packet_hdrs.bhep_hdr->bh_caplen +
                                                packet_hdrs.bhep_hdr->bh_hdrlen);
@@ -268,7 +301,7 @@ void divert_loop(divert_t *divert_handle, int count,
             // store time stamp into variable
             ((u_int64_t *)time_info)[1] = divert_handle->current_time_stamp;
             // extract the headers of current packet
-            payload = divert_dump_ip_data(divert_handle->divert_buffer, errmsg, &packet_hdrs);
+            divert_dump_ip_data(divert_handle->divert_buffer, errmsg, &packet_hdrs);
             if (packet_hdrs.size_ip) {
                 // set the packet information
                 packet_info.time_stamp = divert_handle->current_time_stamp;
@@ -280,15 +313,18 @@ void divert_loop(divert_t *divert_handle, int count,
                                                   time_info,
                                                   compare_packet,
                                                   should_drop)) != NULL) {
-                    // TODO: call the callback function
-
-                    free(node);
+                    // insert the packet into thread buffer
+                    // and let another thread handle it
+                    // in order to save time
+                    packet_info_t *current_packet = (packet_info_t *)node->data;
+                    current_packet->time_stamp = DIVERT_RAW_BPF_PACKET;
+                    divert_buf_insert(divert_handle->thread_buffer, node->data);
                 } else {
                     // if packet is not found in the queue, then just re-inject it
-                    recvfrom(divert_handle->divert_fd,
-                             divert_handle->divert_buffer,
-                             (size_t)num_divert, 0,
-                             &sin, &sin_len);
+                    sendto(divert_handle->divert_fd,
+                           divert_handle->divert_buffer,
+                           (size_t)num_divert, 0,
+                           &sin, sin_len);
                     // TODO: call the error handler
                 }
             }
@@ -296,7 +332,11 @@ void divert_loop(divert_t *divert_handle, int count,
         // increase time stamp
         divert_handle->current_time_stamp++;
     }
-
+    // insert an item into the thread buffer to stop another thread
+    // we should not free this piece of memory immediately
+    packet_info_t *terminal = malloc(sizeof(packet_info_t));
+    terminal->time_stamp = DIVERT_STOP_LOOP;
+    divert_buf_insert(divert_handle->thread_buffer, terminal);
 }
 
 void divert_working_thread(divert_t *handle) {
@@ -320,8 +360,8 @@ int divert_clean(divert_t *divert_handle, char *errmsg) {
         free(divert_handle->divert_buffer);
     }
 
+    // close the pcap handler and clean the thread buffer
     if (divert_handle->flags & DIVERT_FLAG_WITH_APPLE_EXTHDR) {
-        // close the pcap handler
         pcap_close(divert_handle->pcap_handle);
         divert_buf_clean(divert_handle->thread_buffer, errmsg);
     }
