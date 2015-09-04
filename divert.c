@@ -12,6 +12,8 @@ divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
     errmsg[0] = 0;
     divert_t *divert_handle;
     divert_handle = malloc(sizeof(divert_t));
+
+    // all pointers in divert_handle would be NULL
     memset(divert_handle, 0, sizeof(divert_t));
 
     divert_handle->flags = flags;
@@ -37,6 +39,11 @@ int divert_set_data_buffer_size(divert_t *handle, size_t bufsize) {
 int divert_set_thread_buffer_size(divert_t *handle, size_t bufsize) {
     handle->thread_buffer_size = bufsize;
     return 1;
+}
+
+int divert_set_error_handler(divert_t *handle, divert_error_handler_t handler) {
+    handle->err_handler = handler;
+    return 0;
 }
 
 int divert_set_pcap_filter(divert_t *divert_handle, char *pcap_filter, char *errmsg) {
@@ -223,13 +230,24 @@ static void *divert_thread(void *arg) {
     void *callback_args = handle->callback_args;
     while (handle->is_looping) {
         packet = divert_buf_remove(buf);
-        if (packet->time_stamp & DIVERT_STOP_LOOP) {
+        // if this is a normal data packet
+        if (packet->time_stamp &
+            (DIVERT_RAW_BPF_PACKET |
+             DIVERT_RAW_IP_PACKET)) {
+            callback(callback_args, packet->raw_data, packet->time_stamp);
+            free(packet->raw_data);
+            free(packet);
+        } else if (packet->time_stamp &
+                   (DIVERT_ERROR_BPF_INVALID |
+                    DIVERT_ERROR_BPF_NODATA |
+                    DIVERT_ERROR_NOINFO)) {
+            // call the error handling funtion
+            handle->err_handler(packet->time_stamp);
+            free(packet);
+        } else if (packet->time_stamp & DIVERT_STOP_LOOP) {
             free(packet);
             break;
         }
-        callback(callback_args, packet->raw_data, packet->time_stamp);
-        free(packet->raw_data);
-        free(packet);
     }
     return NULL;
 }
@@ -281,10 +299,14 @@ void divert_loop(divert_t *divert_handle, int count,
                                                      (u_char *)packet_hdrs.bhep_hdr));
                 queue_push(divert_handle->bpf_queue, new_packet);
             } else {
-                // TODO: call the error handler
+                packet_info_t *new_packet = malloc(sizeof(packet_info_t));
+                new_packet->time_stamp = DIVERT_ERROR_BPF_INVALID;
+                divert_buf_insert(divert_handle->thread_buffer, new_packet);
             }
         } else {
-            // TODO: call the error handler
+            packet_info_t *new_packet = malloc(sizeof(packet_info_t));
+            new_packet->time_stamp = DIVERT_ERROR_BPF_NODATA;
+            divert_buf_insert(divert_handle->thread_buffer, new_packet);
         }
 
         // returns a packet of IP protocol structure
@@ -325,7 +347,9 @@ void divert_loop(divert_t *divert_handle, int count,
                            divert_handle->divert_buffer,
                            (size_t)num_divert, 0,
                            &sin, sin_len);
-                    // TODO: call the error handler
+                    packet_info_t *new_packet = malloc(sizeof(packet_info_t));
+                    new_packet->time_stamp = DIVERT_ERROR_NOINFO;
+                    divert_buf_insert(divert_handle->thread_buffer, new_packet);
                 }
             }
         }

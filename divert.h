@@ -45,7 +45,7 @@
 
 typedef void (*divert_callback_t)(void *args, u_char *packet, u_int64_t flags);
 
-typedef void (*divert_error_handler_t)(u_int32_t errflags);
+typedef void (*divert_error_handler_t)(u_int64_t errflags);
 
 typedef struct {
     u_int32_t flags;
@@ -122,6 +122,8 @@ divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg);
 int divert_set_data_buffer_size(divert_t *handle, size_t bufsize);
 
 int divert_set_thread_buffer_size(divert_t *handle, size_t bufsize);
+
+int divert_set_error_handler(divert_t *handle, divert_error_handler_t handler);
 
 int divert_set_pcap_filter(divert_t *divert_handle, char *pcap_filter, char *errmsg);
 
