@@ -6,7 +6,7 @@
 #include <netinet/udp.h>
 
 
-void print_packet(FILE *fp, u_int32_t flags, packet_hdrs_t *packet_headers) {
+void divert_print_packet(FILE *fp, u_int32_t flags, packet_hdrs_t *packet_headers) {
     static u_int32_t count = 1;
     if (flags & PRINT_NEWLINE) {
         puts("");
@@ -16,7 +16,7 @@ void print_packet(FILE *fp, u_int32_t flags, packet_hdrs_t *packet_headers) {
     }
     if (flags & PRINT_PROC) {
         fprintf(fp, "\tProcess information: %s:%d\n",
-                packet_headers->bhep_hdr->bh_comm, packet_headers->bhep_hdr->bh_pid);
+                packet_headers->pktap_hdr->pth_comm, packet_headers->pktap_hdr->pth_pid);
     }
     if (flags & PRINT_DATA_LINK) {
         fprintf(fp, "\tData Link Type: %s\n",

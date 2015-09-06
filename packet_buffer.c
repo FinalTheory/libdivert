@@ -1,5 +1,6 @@
 #include "packet_buffer.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include <pthread.h>
 
 /* Create an empty, bounded, shared FIFO buffer with n slots */
@@ -7,11 +8,18 @@ int divert_buf_init(packet_buf_t *sp, size_t n, char *errmsg) {
     sp->buffer = calloc(n, sizeof(void *));
     /* Buffer holds max of n items */
     sp->n = n;
-    /* Empty buffer iff front == rear */
+    /* Empty buffer if front == rear */
     sp->front = sp->rear = 0;
     /* binary semaphore for locking */
     sp->mutex = malloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(sp->mutex, NULL);
+    /*
+     * note that we should first delete the named semaphore
+     * because if previous usage of these semaphores were not deleted
+     * then that would affect our new usage in current context
+     */
+    sem_unlink(BUF_SEM_ITEM);
+    sem_unlink(BUF_SEM_SLOT);
     /* initially, buf has n empty slots */
     sp->slots = sem_open(BUF_SEM_SLOT, O_CREAT, S_IRUSR | S_IWUSR, n);
     /* initially, buf has zero data items */
@@ -28,7 +36,9 @@ int divert_buf_init(packet_buf_t *sp, size_t n, char *errmsg) {
 /* Clean up buffer sp */
 void divert_buf_clean(packet_buf_t *sp, char *errmsg) {
     sem_close(sp->items);
+    sem_unlink(BUF_SEM_ITEM);
     sem_close(sp->slots);
+    sem_unlink(BUF_SEM_SLOT);
     pthread_mutex_destroy(sp->mutex);
     free(sp->buffer);
 }

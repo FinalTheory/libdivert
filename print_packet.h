@@ -14,6 +14,6 @@
 #define PRINT_PROT      (1 << 6)
 #define PRINT_PAYLOAD   (1 << 7)
 
-
+void divert_print_packet(FILE *fp, u_int32_t flags, packet_hdrs_t *packet_headers);
 
 #endif //DIVERT_PACKET_HANDLER_H

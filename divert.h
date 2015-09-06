@@ -30,8 +30,8 @@
  * or just divert the raw IP packets
  */
 
-#define DIVERT_FLAG_WITH_APPLE_EXTHDR (1)
-
+#define DIVERT_FLAG_WITH_APPLE_EXTHDR   (1)
+#define DIVERT_FLAG_PRECISE_INFO        (1 << 1)
 
 /*
  * flags for packet buffer and error handling
@@ -40,10 +40,12 @@
 #define DIVERT_RAW_IP_PACKET        (1 << 1)
 #define DIVERT_ERROR_BPF_INVALID    (1 << 2)
 #define DIVERT_ERROR_BPF_NODATA     (1 << 3)
-#define DIVERT_ERROR_NOINFO         (1 << 4)
-#define DIVERT_STOP_LOOP            (1 << 5)
+#define DIVERT_ERROR_DIVERT_NODATA  (1 << 4)
+#define DIVERT_ERROR_NOINFO         (1 << 5)
+#define DIVERT_STOP_LOOP            (1 << 6)
 
-typedef void (*divert_callback_t)(void *args, u_char *packet, u_int64_t flags);
+typedef void (*divert_callback_t)(void *args, u_char *packet,
+                                  u_int64_t flags, struct sockaddr *sin);
 
 typedef void (*divert_error_handler_t)(u_int64_t errflags);
 
@@ -77,6 +79,7 @@ typedef struct {
     queue_t *bpf_queue;             // handle for queue structure
     packet_buf_t *thread_buffer;    // buffer for labeled packet
     size_t thread_buffer_size;      // buffer size of labeled packet
+    struct sockaddr *divert_sin;    // store information of diverted packets
 
     /*
      * statics information
@@ -84,6 +87,7 @@ typedef struct {
     u_int64_t timeout;
     u_int64_t current_time_stamp;
     u_int64_t num_missed;
+    u_int64_t num_diverted;
 
     /*
      * other information
