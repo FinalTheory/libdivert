@@ -42,7 +42,7 @@ int main() {
     }
     signal(SIGINT, intHandler);
     divert_loop(handle, 1000, callback, handle);
-    printf("Fail rate: %f\n", handle->num_diverted /
+    printf("Capture rate: %f\n", handle->num_diverted /
                               (double)(handle->num_diverted + handle->num_missed));
     if (divert_clean(handle, errmsg) == 0) {
         puts("Successfully cleaned.");

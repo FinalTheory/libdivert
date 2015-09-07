@@ -3,19 +3,13 @@
 #include <string.h>
 #include <stdio.h>
 
-pthread_mutex_t mutex;
-
 queue_t *queue_create() {
     queue_t *queue = malloc(sizeof(queue_t));
     memset(queue, 0, sizeof(queue_t));
-    //queue->mutex = malloc(sizeof(pthread_mutex_t));
-    //pthread_mutex_init(queue->mutex, NULL);
-    pthread_mutex_init(&mutex, NULL);
     return queue;
 }
 
 queue_node_t *queue_push(queue_t *queue, void *data) {
-    pthread_mutex_lock(&mutex);
     queue_node_t *new_node = malloc(sizeof(queue_node_t));
     new_node->next = NULL;
     new_node->data = data;
@@ -28,12 +22,10 @@ queue_node_t *queue_push(queue_t *queue, void *data) {
         queue->tail = new_node;
     }
     queue->size++;
-    pthread_mutex_unlock(&mutex);
     return new_node;
 }
 
 queue_node_t *queue_pop(queue_t *queue) {
-    pthread_mutex_lock(&mutex);
     queue_node_t *result = NULL;
     if (queue->head == NULL || queue->tail == NULL) {
         // this is a empty queue
@@ -50,7 +42,6 @@ queue_node_t *queue_pop(queue_t *queue) {
         }
         queue->size--;
     }
-    pthread_mutex_unlock(&mutex);
     return result;
 }
 
@@ -77,7 +68,6 @@ queue_node_t *queue_search_and_drop(queue_t *queue,
                                     queue_compare_function_t cmp,
                                     queue_drop_function_t drop,
                                     queue_free_function_t destroy) {
-    pthread_mutex_lock(&mutex);
     queue_node_t *current_node = queue->head;
     queue_node_t *prev_node = NULL;
     queue_node_t *result = NULL;
@@ -92,12 +82,11 @@ queue_node_t *queue_search_and_drop(queue_t *queue,
         if (drop(current_node->data, args)) {
             queue_delete_node(queue, prev_node, current_node->next);
             destroy(current_node->data);
-            //free(current_node);
+            free(current_node);
         } else {
             prev_node = current_node;
         }
         current_node = current_node->next;
     }
-    pthread_mutex_unlock(&mutex);
     return result;
 }

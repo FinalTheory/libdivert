@@ -16,7 +16,6 @@ struct queue_node {
 typedef struct queue_node queue_node_t;
 
 typedef struct {
-    pthread_mutex_t *mutex;
     queue_node_t *head;
     queue_node_t *tail;
     u_int32_t size;

@@ -24,6 +24,7 @@
 #define PACKET_TIME_OUT     15
 #define PACKET_BUFFER_SIZE  4096
 
+#define MAX_EVENT_COUNT     16
 /*
  * flags to control divert behaviour
  * you can choose to use extended information
@@ -43,6 +44,7 @@
 #define DIVERT_ERROR_DIVERT_NODATA  (1 << 4)
 #define DIVERT_ERROR_NOINFO         (1 << 5)
 #define DIVERT_STOP_LOOP            (1 << 6)
+#define DIVERT_ERROR_KQUEUE         (1 << 7)
 
 typedef void (*divert_callback_t)(void *args, u_char *packet,
                                   u_int64_t flags, struct sockaddr *sin);

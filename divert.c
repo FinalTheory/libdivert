@@ -1,13 +1,12 @@
 #include "divert.h"
 #include "divert_ipfw.h"
 #include "dump_packet.h"
-#include "queue.h"
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <errno.h>
-#include <pthread.h>
+#include <sys/event.h>
 
 divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
     errmsg[0] = 0;
@@ -227,9 +226,9 @@ static int should_drop(void *data, void *args) {
 }
 
 static void free_packet_into(void *ptr) {
-//    packet_info_t *p = (packet_info_t *)ptr;
-//    free(p->raw_data);
-//    free(p);
+    packet_info_t *p = (packet_info_t *)ptr;
+    free(p->raw_data);
+    free(p);
 }
 
 static inline packet_info_t *divert_new_error_packet(u_int64_t flag) {
@@ -254,68 +253,22 @@ static void *divert_thread_callback(void *arg) {
              DIVERT_RAW_IP_PACKET)) {
             callback(callback_args, packet->raw_data,
                      packet->time_stamp, handle->divert_sin);
-//            if (packet->raw_data != NULL) {
-//                free(packet->raw_data);
-//            } else {
-//                puts("Ops! fuck!!!");
-//                free(packet->raw_data);
-//            }
-            //free(packet);
+            free(packet->raw_data);
+            free(packet);
         } else if (packet->time_stamp &
                    (DIVERT_ERROR_BPF_INVALID |
                     DIVERT_ERROR_BPF_NODATA |
                     DIVERT_ERROR_NOINFO |
-                    DIVERT_ERROR_DIVERT_NODATA)) {
+                    DIVERT_ERROR_DIVERT_NODATA |
+                    DIVERT_ERROR_KQUEUE)) {
             // call the error handling function
             if (handle->err_handler != NULL) {
                 handle->err_handler(packet->time_stamp);
             }
-            //free(packet);
+            free(packet);
         } else if (packet->time_stamp & DIVERT_STOP_LOOP) {
-            //free(packet);
+            free(packet);
             break;
-        }
-    }
-    return NULL;
-}
-
-static void *divert_thread_sniffing(void *arg) {
-    ssize_t num_bpf;
-    char errmsg[PCAP_ERRBUF_SIZE];
-    packet_hdrs_t packet_hdrs;
-    divert_t *handle = (divert_t *)arg;
-    
-    while (handle->is_looping) {
-        // returns a packet of BPF structure
-        num_bpf = read(handle->bpf_fd,
-                       handle->bpf_buffer,
-                       handle->bufsize);
-        // handle the BPF packet: just push it into queue
-        // things in the queue are pointers to packet_info_t
-        if (num_bpf > 0) {
-            // first dump the headers of this packet
-            divert_dump_bpf_raw_data(handle->bpf_buffer, errmsg, &packet_hdrs);
-            if (packet_hdrs.size_ip) {
-                size_t bpf_len = BPF_WORDALIGN(packet_hdrs.bhep_hdr->bh_caplen +
-                                               packet_hdrs.bhep_hdr->bh_hdrlen);
-                packet_info_t *new_packet = malloc(sizeof(packet_info_t));
-                new_packet->time_stamp = handle->current_time_stamp;
-                // allocate memory
-                new_packet->raw_data = malloc(bpf_len);
-                // copy data
-                memcpy(new_packet->raw_data, handle->bpf_buffer, bpf_len);
-                // calculate position of ip header
-                new_packet->ip_data = (struct ip *)(new_packet->raw_data +
-                                                    ((u_char *)packet_hdrs.ip_hdr -
-                                                     (u_char *)packet_hdrs.bhep_hdr));
-                queue_push(handle->bpf_queue, new_packet);
-            } else {
-                divert_buf_insert(handle->thread_buffer,
-                                  divert_new_error_packet(DIVERT_ERROR_BPF_INVALID));
-            }
-        } else {
-            divert_buf_insert(handle->thread_buffer,
-                              divert_new_error_packet(DIVERT_ERROR_BPF_NODATA));
         }
     }
     return NULL;
@@ -325,8 +278,7 @@ void divert_loop(divert_t *divert_handle, int count,
                  divert_callback_t callback, void *args) {
     void *ret_val;
     pthread_t divert_thread_callback_handle;
-    pthread_t divert_thread_sniffing_handle;
-    ssize_t num_divert;
+    ssize_t num_divert, num_bpf;
     queue_node_t *node;
     void *time_info = malloc(2 * sizeof(u_int64_t));
     char errmsg[PCAP_ERRBUF_SIZE];
@@ -346,56 +298,113 @@ void divert_loop(divert_t *divert_handle, int count,
     divert_handle->num_diverted = 0;
     divert_handle->current_time_stamp = 0;
     pthread_create(&divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
-    pthread_create(&divert_thread_sniffing_handle, NULL, divert_thread_sniffing, divert_handle);
-    while (divert_handle->is_looping) {
-        // returns a packet of IP protocol structure
-        num_divert = recvfrom(divert_handle->divert_fd,
-                              divert_handle->divert_buffer,
-                              divert_handle->bufsize, 0,
-                              divert_handle->divert_sin, &sin_len);
 
-        if (num_divert > 0) {
-            // store time stamp into variable
-            ((u_int64_t *)time_info)[1] = divert_handle->current_time_stamp;
-            // extract the headers of current packet
-            divert_dump_ip_data(divert_handle->divert_buffer, errmsg, &packet_hdrs);
-            if (packet_hdrs.size_ip) {
-                // set the packet information
-                // note that the divert socket receives a packet of IP protocol
-                packet_info.time_stamp = divert_handle->current_time_stamp;
-                packet_info.ip_data = packet_hdrs.ip_hdr;
-                packet_info.raw_data = (u_char *)packet_info.ip_data;
-                // search in queue and find process info of this packet
-                if ((node = queue_search_and_drop(divert_handle->bpf_queue,
-                                                  &packet_info,
-                                                  time_info,
-                                                  compare_packet,
-                                                  should_drop,
-                                                  free_packet_into)) != NULL) {
-                    // insert the packet into thread buffer
-                    // and let another thread handle it
-                    // in order to save time
-                    packet_info_t *current_packet = (packet_info_t *)node->data;
-                    current_packet->time_stamp = DIVERT_RAW_BPF_PACKET;
-                    divert_buf_insert(divert_handle->thread_buffer, current_packet);
-                    divert_handle->num_diverted++;
-                    // release the memory of this node
-                    //free(node);
-                } else {
-                    // if packet is not found in the queue, then just re-inject it
-                    sendto(divert_handle->divert_fd,
-                           divert_handle->divert_buffer,
-                           (size_t)num_divert, 0,
-                           divert_handle->divert_sin, sin_len);
-                    divert_handle->num_missed++;
-                    divert_buf_insert(divert_handle->thread_buffer,
-                                      divert_new_error_packet(DIVERT_ERROR_NOINFO));
+    /* register two file descriptor into kqueue */
+    int kq = kqueue();
+    struct kevent changes[2];
+    EV_SET(&changes[0], divert_handle->divert_fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
+    EV_SET(&changes[1], divert_handle->bpf_fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
+    int ret = kevent(kq, changes, 2, NULL, 0, NULL);
+    if (ret == -1) {
+        fprintf(stderr, "Kevent failed: %s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+    /* array to hold kqueue events */
+    struct kevent events[MAX_EVENT_COUNT];
+
+    while (divert_handle->is_looping) {
+        int num_events = kevent(kq, NULL, 0, events, MAX_EVENT_COUNT, NULL);
+        if (num_events == -1) {
+            divert_buf_insert(divert_handle->thread_buffer,
+                              divert_new_error_packet(DIVERT_ERROR_KQUEUE));
+        } else {
+            for (int i = 0; i < num_events; i++) {
+                uintptr_t fd = events[i].ident;
+                //intptr_t data_size = events[i].data;
+                if (fd == divert_handle->bpf_fd) {
+                    // returns a packet of BPF structure
+                    num_bpf = read(divert_handle->bpf_fd,
+                                   divert_handle->bpf_buffer,
+                                   divert_handle->bufsize);
+                    // divert_handle the BPF packet: just push it into queue
+                    // things in the queue are pointers to packet_info_t
+                    if (num_bpf > 0) {
+                        // first dump the headers of this packet
+                        divert_dump_bpf_raw_data(divert_handle->bpf_buffer, errmsg, &packet_hdrs);
+                        if (packet_hdrs.size_ip) {
+                            size_t bpf_len = BPF_WORDALIGN(packet_hdrs.bhep_hdr->bh_caplen +
+                                                           packet_hdrs.bhep_hdr->bh_hdrlen);
+                            packet_info_t *new_packet = malloc(sizeof(packet_info_t));
+                            new_packet->time_stamp = divert_handle->current_time_stamp;
+                            // allocate memory
+                            new_packet->raw_data = malloc(bpf_len);
+                            // copy data
+                            memcpy(new_packet->raw_data, divert_handle->bpf_buffer, bpf_len);
+                            // calculate position of ip header
+                            new_packet->ip_data = (struct ip *)(new_packet->raw_data +
+                                                                ((u_char *)packet_hdrs.ip_hdr -
+                                                                 (u_char *)packet_hdrs.bhep_hdr));
+                            queue_push(divert_handle->bpf_queue, new_packet);
+                        } else {
+                            divert_buf_insert(divert_handle->thread_buffer,
+                                              divert_new_error_packet(DIVERT_ERROR_BPF_INVALID));
+                        }
+                    } else {
+                        divert_buf_insert(divert_handle->thread_buffer,
+                                          divert_new_error_packet(DIVERT_ERROR_BPF_NODATA));
+                    }
+                } else if (fd == divert_handle->divert_fd) {
+                    // returns a packet of IP protocol structure
+                    num_divert = recvfrom(divert_handle->divert_fd,
+                                          divert_handle->divert_buffer,
+                                          divert_handle->bufsize, 0,
+                                          divert_handle->divert_sin, &sin_len);
+
+                    if (num_divert > 0) {
+                        // store time stamp into variable
+                        ((u_int64_t *)time_info)[1] = divert_handle->current_time_stamp;
+                        // extract the headers of current packet
+                        divert_dump_ip_data(divert_handle->divert_buffer, errmsg, &packet_hdrs);
+                        if (packet_hdrs.size_ip) {
+                            // set the packet information
+                            // note that the divert socket receives a packet of IP protocol
+                            packet_info.time_stamp = divert_handle->current_time_stamp;
+                            packet_info.ip_data = packet_hdrs.ip_hdr;
+                            packet_info.raw_data = (u_char *)packet_info.ip_data;
+                            // search in queue and find process info of this packet
+                            if ((node = queue_search_and_drop(divert_handle->bpf_queue,
+                                                              &packet_info,
+                                                              time_info,
+                                                              compare_packet,
+                                                              should_drop,
+                                                              free_packet_into)) != NULL) {
+                                // insert the packet into thread buffer
+                                // and let another thread handle it
+                                // in order to save time
+                                packet_info_t *current_packet = (packet_info_t *)node->data;
+                                current_packet->time_stamp = DIVERT_RAW_BPF_PACKET;
+                                divert_buf_insert(divert_handle->thread_buffer, current_packet);
+                                divert_handle->num_diverted++;
+                                // release the memory of this node
+                                free(node);
+                            } else {
+                                // if packet is not found in the queue, then just re-inject it
+                                sendto(divert_handle->divert_fd,
+                                       divert_handle->divert_buffer,
+                                       (size_t)num_divert, 0,
+                                       divert_handle->divert_sin, sin_len);
+                                divert_handle->num_missed++;
+                                divert_buf_insert(divert_handle->thread_buffer,
+                                                  divert_new_error_packet(DIVERT_ERROR_NOINFO));
+                            }
+                        }
+                    } else {
+                        // no valid data, so insert a flag into thread buffer
+                        divert_buf_insert(divert_handle->thread_buffer,
+                                          divert_new_error_packet(DIVERT_ERROR_DIVERT_NODATA));
+                    }
                 }
             }
-        } else {
-            // no valid data, so insert a flag into thread buffer
-            divert_buf_insert(divert_handle->thread_buffer,
-                              divert_new_error_packet(DIVERT_ERROR_DIVERT_NODATA));
         }
         // increase time stamp
         divert_handle->current_time_stamp++;
@@ -409,7 +418,6 @@ void divert_loop(divert_t *divert_handle, int count,
                       divert_new_error_packet(DIVERT_STOP_LOOP));
     // wait until the child thread is stopped
     pthread_join(divert_thread_callback_handle, &ret_val);
-    pthread_join(divert_thread_sniffing_handle, &ret_val);
 }
 
 void divert_working_thread(divert_t *handle) {
