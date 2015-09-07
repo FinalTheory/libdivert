@@ -4,7 +4,7 @@
 
 #ifndef DIVERT_QUEUE_H
 #define DIVERT_QUEUE_H
-
+#include <stdio.h>
 #include <sys/types.h>
 #include <pthread.h>
 
@@ -50,5 +50,7 @@ queue_node_t *queue_search_and_drop(queue_t *queue,
                                     queue_free_function_t destroy);
 
 queue_node_t *queue_search(queue_t *queue, void *data);
+
+void queue_dump(queue_t *queue, FILE *fp);;
 
 #endif //DIVERT_QUEUE_H

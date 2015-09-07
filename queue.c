@@ -1,12 +1,23 @@
 #include "queue.h"
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
 queue_t *queue_create() {
     queue_t *queue = malloc(sizeof(queue_t));
     memset(queue, 0, sizeof(queue_t));
     return queue;
+}
+
+void queue_dump(queue_t *queue, FILE *fp) {
+    queue_node_t *node = queue->head;
+    while (node != NULL) {
+        if (node != queue->head) {
+            fprintf(fp, " => ");
+        }
+        fprintf(fp, "%p", node);
+        node = node->next;
+    }
+    fprintf(fp, " => NULL\n");
 }
 
 queue_node_t *queue_push(queue_t *queue, void *data) {
@@ -57,6 +68,7 @@ static inline void queue_delete_node(queue_t *queue,
     } else if (next == NULL) {
         // if this is the last node
         queue->tail = prev;
+        prev->next = NULL;
     } else {
         prev->next = next;
     }
@@ -70,13 +82,11 @@ queue_node_t *queue_search_and_drop(queue_t *queue,
                                     queue_free_function_t destroy) {
     queue_node_t *current_node = queue->head;
     queue_node_t *prev_node = NULL;
-    queue_node_t *result = NULL;
     while (current_node != NULL) {
         // if found, then remove
         if (cmp(current_node->data, data)) {
             queue_delete_node(queue, prev_node, current_node->next);
-            result = current_node;
-            break;
+            return current_node;
         }
         // if current data should be dropped
         if (drop(current_node->data, args)) {
@@ -88,5 +98,5 @@ queue_node_t *queue_search_and_drop(queue_t *queue,
         }
         current_node = current_node->next;
     }
-    return result;
+    return NULL;
 }

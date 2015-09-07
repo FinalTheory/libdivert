@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <sys/event.h>
 
+// TODO: 实现一个单例模式？
 divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
     errmsg[0] = 0;
     divert_t *divert_handle;
@@ -141,17 +142,6 @@ static int divert_init_divert_socket(divert_t *divert_handle, char *errmsg) {
         return DIVERT_FAILURE;
     }
 
-    /*
-     * set socket to non-blocking
-     * this is used only when we use the extended info
-     */
-//    if (divert_handle->flags & DIVERT_FLAG_WITH_APPLE_EXTHDR) {
-//        if (fcntl(divert_handle->divert_fd, F_SETFL, O_NONBLOCK) != 0) {
-//            sprintf(errmsg, "Couldn't set socket to non-blocking mode");
-//            return DIVERT_FAILURE;
-//        }
-//    }
-
     // bind divert socket to port
     if (bind(divert_handle->divert_fd, (struct sockaddr *)&divert_handle->divert_port,
              sizeof(struct sockaddr_in)) != 0) {
@@ -225,7 +215,7 @@ static int should_drop(void *data, void *args) {
     }
 }
 
-static void free_packet_into(void *ptr) {
+static void free_packet_data(void *ptr) {
     packet_info_t *p = (packet_info_t *)ptr;
     free(p->raw_data);
     free(p);
@@ -306,7 +296,7 @@ void divert_loop(divert_t *divert_handle, int count,
     EV_SET(&changes[1], divert_handle->bpf_fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
     int ret = kevent(kq, changes, 2, NULL, 0, NULL);
     if (ret == -1) {
-        fprintf(stderr, "Kevent failed: %s", strerror(errno));
+        fprintf(stderr, "kevent failed: %s", strerror(errno));
         exit(EXIT_FAILURE);
     }
     /* array to hold kqueue events */
@@ -377,16 +367,16 @@ void divert_loop(divert_t *divert_handle, int count,
                                                               time_info,
                                                               compare_packet,
                                                               should_drop,
-                                                              free_packet_into)) != NULL) {
+                                                              free_packet_data)) != NULL) {
                                 // insert the packet into thread buffer
                                 // and let another thread handle it
                                 // in order to save time
                                 packet_info_t *current_packet = (packet_info_t *)node->data;
+                                // release the memory of this node
+                                free(node);
                                 current_packet->time_stamp = DIVERT_RAW_BPF_PACKET;
                                 divert_buf_insert(divert_handle->thread_buffer, current_packet);
                                 divert_handle->num_diverted++;
-                                // release the memory of this node
-                                free(node);
                             } else {
                                 // if packet is not found in the queue, then just re-inject it
                                 sendto(divert_handle->divert_fd,
@@ -418,10 +408,6 @@ void divert_loop(divert_t *divert_handle, int count,
                       divert_new_error_packet(DIVERT_STOP_LOOP));
     // wait until the child thread is stopped
     pthread_join(divert_thread_callback_handle, &ret_val);
-}
-
-void divert_working_thread(divert_t *handle) {
-
 }
 
 void divert_loop_stop(divert_t *handle) {
