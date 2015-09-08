@@ -1,6 +1,9 @@
 #include "divert.h"
 #include "dump_packet.h"
 #include "print_packet.h"
+#include "net/pktap.h"
+#include "print_data.h"
+#include "queue.h"
 #include <stdlib.h>
 
 
@@ -10,25 +13,20 @@ void intHandler(int signal) {
     handle->is_looping = 0;
 }
 
-void callback(void *args, u_char *packet, u_int64_t flags, struct sockaddr *sin) {
+void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, struct sockaddr *sin) {
+    char errmsg[256];
+    packet_hdrs_t packet_hdrs;
     socklen_t sin_len = sizeof(struct sockaddr_in);
-    packet_hdrs_t hdrs;
-    char errmsg[PCAP_ERRBUF_SIZE];
     divert_t *handle = (divert_t *)args;
+    sendto(handle->divert_fd, packet,
+           ntohs(packet->ip_len), 0, sin, sin_len);
+    if (pktap_hdr != NULL) {
 
-    if (flags & DIVERT_RAW_BPF_PACKET) {
-        divert_dump_bpf_raw_data(packet, errmsg, &hdrs);
-        if (errmsg[0]) {
-            puts(errmsg);
-        } else {
-            divert_print_packet(stderr, PRINT_PROC, &hdrs);
-        }
-        sendto(handle->divert_fd, hdrs.ip_hdr,
-               ntohs(hdrs.ip_hdr->ip_len), 0, sin, sin_len);
+//        divert_dump_ip_data((u_char *)packet, errmsg, &packet_hdrs);
+//        divert_print_packet(stderr, ~(PRINT_DATA_LINK | PRINT_PROC), &packet_hdrs);
     } else {
-        puts("Unknown packet!");
-        printf("flags = %lld\n", flags);
-        exit(EXIT_FAILURE);
+//        divert_dump_ip_data((u_char *)packet, errmsg, &packet_hdrs);
+//        divert_print_packet(stderr, ~(PRINT_DATA_LINK | PRINT_PROC), &packet_hdrs);
     }
 }
 
@@ -41,9 +39,10 @@ int main() {
         exit(EXIT_FAILURE);
     }
     signal(SIGINT, intHandler);
-    divert_loop(handle, 1000, callback, handle);
-    printf("Capture rate: %f\n", handle->num_diverted /
-                              (double)(handle->num_diverted + handle->num_missed));
+    divert_loop(handle, -1, callback, handle);
+    printf("Capture rate: %f\n", handle->num_diverted / (double)(handle->num_captured));
+    printf("Accuracy: %f\n", handle->num_diverted /
+                                 (double)(handle->num_missed + handle->num_diverted));
     if (divert_clean(handle, errmsg) == 0) {
         puts("Successfully cleaned.");
     }

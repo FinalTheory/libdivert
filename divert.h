@@ -9,6 +9,7 @@
 #include "pcap/pcap-int.h"
 #include "queue.h"
 #include "packet_buffer.h"
+#include "packet_info.h"
 
 /*
  * flags for error handling
@@ -21,7 +22,7 @@
 /*
  * default packet parameters
  */
-#define PACKET_TIME_OUT     15
+#define PACKET_TIME_OUT     100
 #define PACKET_BUFFER_SIZE  4096
 
 #define MAX_EVENT_COUNT     16
@@ -37,17 +38,16 @@
 /*
  * flags for packet buffer and error handling
  */
-#define DIVERT_RAW_BPF_PACKET       (1)
-#define DIVERT_RAW_IP_PACKET        (1 << 1)
-#define DIVERT_ERROR_BPF_INVALID    (1 << 2)
-#define DIVERT_ERROR_BPF_NODATA     (1 << 3)
-#define DIVERT_ERROR_DIVERT_NODATA  (1 << 4)
-#define DIVERT_ERROR_NOINFO         (1 << 5)
-#define DIVERT_STOP_LOOP            (1 << 6)
-#define DIVERT_ERROR_KQUEUE         (1 << 7)
+#define DIVERT_RAW_BPF_PACKET       (1u)
+#define DIVERT_RAW_IP_PACKET        (1u << 1)
+#define DIVERT_ERROR_BPF_INVALID    (1u << 2)
+#define DIVERT_ERROR_BPF_NODATA     (1u << 3)
+#define DIVERT_ERROR_DIVERT_NODATA  (1u << 4)
+#define DIVERT_STOP_LOOP            (1u << 5)
+#define DIVERT_ERROR_KQUEUE         (1u << 6)
 
-typedef void (*divert_callback_t)(void *args, u_char *packet,
-                                  u_int64_t flags, struct sockaddr *sin);
+typedef void (*divert_callback_t)(void *args, struct pktap_header *pktap_hdr,
+                                  struct ip *ip_data, struct sockaddr *sin);
 
 typedef void (*divert_error_handler_t)(u_int64_t errflags);
 
@@ -82,6 +82,8 @@ typedef struct {
     packet_buf_t *thread_buffer;    // buffer for labeled packet
     size_t thread_buffer_size;      // buffer size of labeled packet
     struct sockaddr *divert_sin;    // store information of diverted packets
+    struct packet_map_t *packet_map;// map from packet info (ip src, dst, port src, dst)
+                                    // to its process information
 
     /*
      * statics information
@@ -89,6 +91,7 @@ typedef struct {
     u_int64_t timeout;
     u_int64_t current_time_stamp;
     u_int64_t num_missed;
+    u_int64_t num_captured;
     u_int64_t num_diverted;
 
     /*
@@ -118,8 +121,7 @@ typedef struct {
 
 typedef struct {
     u_int64_t time_stamp;
-    u_char *raw_data;
-    // this pointer points a offset in raw_data
+    struct pktap_header *pktap_hdr;
     struct ip *ip_data;
 } packet_info_t;
 

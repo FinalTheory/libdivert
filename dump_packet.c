@@ -78,6 +78,13 @@ u_char *divert_dump_ip_data(u_char *packet, char *errmsg, packet_hdrs_t *result)
     size_t size_payload = 0;
 
     result->ip_hdr = ip_hdr;
+    result->tcp_hdr = NULL;
+    result->udp_hdr = NULL;
+    result->payload = NULL;
+    result->size_ip = 0;
+    result->size_tcp = 0;
+    result->size_udp = 0;
+    result->size_payload = 0;
 
     size_ip = IP_VHL_HL(ip_hdr->ip_vhl) * 4u;
     if (size_ip < 20) {
