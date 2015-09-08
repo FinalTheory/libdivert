@@ -265,6 +265,14 @@ static void *divert_thread_callback(void *arg) {
             free(packet);
             break;
         }
+        // if the cache is too big, just free it
+        if (packet_map_get_size(handle->packet_map) > PACKET_INFO_CACHE_SIZE) {
+            packet_map_clean(handle->packet_map);
+#ifdef DEBUG
+            puts("Now clean buffer.");
+            printf("Current size: %zu\n", packet_map_get_size(handle->packet_map));
+#endif
+        }
     }
     return NULL;
 }

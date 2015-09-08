@@ -123,6 +123,10 @@ struct pktap_header *packet_map_query(packet_map_t *mp,
     return result;
 }
 
+size_t packet_map_get_size(packet_map_t *mp) {
+    return mp->packet_map->size();
+}
+
 typedef pair<__packet_map_t*, __mem_pointers_t*> thread_data_t;
 
 void *packet_map_clean_thread(void *data) {

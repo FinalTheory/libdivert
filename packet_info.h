@@ -33,6 +33,8 @@ struct pktap_header *packet_map_query(struct packet_map_t *mp,
                                       u_short _port_src,
                                       u_short _port_dst);
 
+size_t packet_map_get_size(struct packet_map_t *mp);
+
 void packet_map_clean(struct packet_map_t *mp);
 
 #ifdef  __cplusplus

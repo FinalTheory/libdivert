@@ -21,9 +21,8 @@ void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, str
     sendto(handle->divert_fd, packet,
            ntohs(packet->ip_len), 0, sin, sin_len);
     if (pktap_hdr != NULL) {
-
 //        divert_dump_ip_data((u_char *)packet, errmsg, &packet_hdrs);
-//        divert_print_packet(stderr, ~(PRINT_DATA_LINK | PRINT_PROC), &packet_hdrs);
+//        divert_print_packet(stderr, ~0u, &packet_hdrs);
     } else {
 //        divert_dump_ip_data((u_char *)packet, errmsg, &packet_hdrs);
 //        divert_print_packet(stderr, ~(PRINT_DATA_LINK | PRINT_PROC), &packet_hdrs);
