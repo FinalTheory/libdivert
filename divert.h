@@ -82,7 +82,6 @@ typedef struct {
     queue_t *bpf_queue;             // handle for queue structure
     packet_buf_t *thread_buffer;    // buffer for labeled packet
     size_t thread_buffer_size;      // buffer size of labeled packet
-    struct sockaddr *divert_sin;    // store information of diverted packets
     struct packet_map_t *packet_map;// map from packet info (ip src, dst, port src, dst)
                                     // to its process information
 
@@ -124,6 +123,7 @@ typedef struct {
     u_int64_t time_stamp;
     struct pktap_header *pktap_hdr;
     struct ip *ip_data;
+    struct sockaddr *sin;
 } packet_info_t;
 
 divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg);

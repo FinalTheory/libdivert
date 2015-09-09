@@ -5,6 +5,8 @@
 #include "print_data.h"
 #include "queue.h"
 #include <arpa/inet.h>
+#include <string.h>
+#include <unistd.h>
 #include <stdlib.h>
 
 
@@ -34,9 +36,6 @@ void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, str
     packet_hdrs_t packet_hdrs;
     socklen_t sin_len = sizeof(struct sockaddr);
 
-    divert_t *handle = (divert_t *)args;
-
-    // reinject the packets without processing
     sendto(handle->divert_fd, packet,
            ntohs(packet->ip_len), 0, sin, sin_len);
 

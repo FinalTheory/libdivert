@@ -36,7 +36,6 @@ divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
     divert_handle->divert_port.sin_family = AF_INET;
     divert_handle->divert_port.sin_port = htons(port_number);
     divert_handle->divert_port.sin_addr.s_addr = 0;
-    divert_handle->divert_sin = malloc(sizeof(struct sockaddr));
 
     // set default timeout
     divert_handle->timeout = PACKET_TIME_OUT;
@@ -260,8 +259,9 @@ static void *divert_thread_callback(void *arg) {
             (DIVERT_RAW_BPF_PACKET |
              DIVERT_RAW_IP_PACKET)) {
             callback(callback_args, packet->pktap_hdr,
-                     packet->ip_data, handle->divert_sin);
+                     packet->ip_data, packet->sin);
             free(packet->ip_data);
+            free(packet->sin);
             free(packet);
         } else if (packet->time_stamp &
                    (DIVERT_ERROR_BPF_INVALID |
@@ -296,6 +296,7 @@ static u_char divert_extract_IP_port(packet_hdrs_t *packet_hdrs,
                                      in_addr_t *ip_dst,
                                      u_short *port_src,
                                      u_short *port_dst) {
+    // TODO: modify here to support ICMP
     u_char is_tcpudp = 0;
     *ip_src = packet_hdrs->ip_hdr->ip_src.s_addr;
     *ip_dst = packet_hdrs->ip_hdr->ip_dst.s_addr;
@@ -431,11 +432,12 @@ void divert_loop_with_pktap(divert_t *divert_handle, int count,
                                           divert_new_error_packet(DIVERT_ERROR_BPF_NODATA));
                     }
                 } else if (fd == divert_handle->divert_fd) {
+                    struct sockaddr *sin = malloc(sin_len);
                     // returns a packet of IP protocol structure
                     num_divert = recvfrom(divert_handle->divert_fd,
                                           divert_handle->divert_buffer,
                                           divert_handle->bufsize, 0,
-                                          divert_handle->divert_sin, &sin_len);
+                                          sin, &sin_len);
 
                     if (num_divert > 0) {
                         // store time stamp into variable
@@ -452,6 +454,7 @@ void divert_loop_with_pktap(divert_t *divert_handle, int count,
                                 // note that the divert socket receives a packet of IP protocol
                                 packet_info.time_stamp = divert_handle->current_time_stamp;
                                 packet_info.ip_data = packet_hdrs.ip_hdr;
+                                packet_info.sin = sin;
                                 packet_info.pktap_hdr = NULL;
                                 if ((node = queue_search_and_drop(divert_handle->bpf_queue,
                                                                   &packet_info,
@@ -467,6 +470,7 @@ void divert_loop_with_pktap(divert_t *divert_handle, int count,
                                     // release the memory of this node
                                     free(node);
                                     current_packet->time_stamp = DIVERT_RAW_IP_PACKET;
+                                    current_packet->sin = sin;
                                     divert_buf_insert(divert_handle->thread_buffer, current_packet);
 #ifdef DEBUG
                                     // for debug
@@ -499,6 +503,7 @@ void divert_loop_with_pktap(divert_t *divert_handle, int count,
                                     packet_info_t *new_packet = malloc(sizeof(packet_info_t));
                                     new_packet->time_stamp = DIVERT_RAW_IP_PACKET;
                                     new_packet->pktap_hdr = pktap_hdr;
+                                    new_packet->sin = sin;
                                     // allocate memory
                                     new_packet->ip_data = malloc(ip_length);
                                     // and copy data
@@ -510,6 +515,7 @@ void divert_loop_with_pktap(divert_t *divert_handle, int count,
                                 // if packet is not found in the queue, then just send it to user
                                 size_t ip_length = ntohs(packet_hdrs.ip_hdr->ip_len);
                                 packet_info_t *new_packet = malloc(sizeof(packet_info_t));
+                                new_packet->sin = sin;
                                 new_packet->time_stamp = DIVERT_RAW_IP_PACKET;
                                 // but the packet information is NULL
                                 new_packet->pktap_hdr = NULL;
@@ -527,6 +533,7 @@ void divert_loop_with_pktap(divert_t *divert_handle, int count,
                         // no valid data, so insert a flag into thread buffer
                         divert_buf_insert(divert_handle->thread_buffer,
                                           divert_new_error_packet(DIVERT_ERROR_DIVERT_NODATA));
+                        free(sin);
                     }
                 }
             }
