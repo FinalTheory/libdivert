@@ -25,16 +25,16 @@
 #define PACKET_TIME_OUT         30
 #define PACKET_BUFFER_SIZE      4096
 #define PACKET_INFO_CACHE_SIZE  10000
-
 #define MAX_EVENT_COUNT     16
+
 /*
  * flags to control divert behaviour
  * you can choose to use extended information
  * or just divert the raw IP packets
  */
 
-#define DIVERT_FLAG_WITH_APPLE_EXTHDR   (1)
-#define DIVERT_FLAG_PRECISE_INFO        (1 << 1)
+#define DIVERT_FLAG_WITH_PKTAP   (1)
+#define DIVERT_FLAG_PRECISE_INFO (1 << 1)
 
 /*
  * flags for packet buffer and error handling

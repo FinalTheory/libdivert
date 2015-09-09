@@ -8,10 +8,17 @@
 #include "divert.h"
 #include <sys/types.h>
 
-u_char *divert_dump_bpf_raw_data(u_char *packet, char *errmsg, packet_hdrs_t *result);
+#define DIVERT_DUMP_BPF_HERDER      (1u)
+#define DIVERT_DUMP_PKTAP_HERDER    (1u << 1)
+#define DIVERT_DUMP_ETHER_HERDER    (1u << 2)
+#define DIVERT_DUMP_IP_HEADER       (1u << 3)
 
-u_char *divert_dump_ethernet_data(u_char *packet, char *errmsg, packet_hdrs_t *result);
+#define MAGIC_OFFSET 4u
 
-u_char *divert_dump_ip_data(u_char *packet, char *errmsg, packet_hdrs_t *result);
+#define MIN_IP_HEADER_SIZE  20u
+#define MIN_TCP_HEADER_SIZE 20u
+
+u_char *divert_dump_packet(u_char *packet, packet_hdrs_t *result,
+                           u_int32_t flags, char *errmsg);
 
 #endif //DIVERT_DUMP_PACKET_H

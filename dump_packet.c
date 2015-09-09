@@ -1,4 +1,5 @@
 #include "dump_packet.h"
+#include "divert.h"
 #include <string.h>
 #include <net/ethernet.h>
 #include <netinet/tcp.h>
@@ -31,122 +32,130 @@
     .                           .
  */
 
-
-u_char *divert_dump_bpf_raw_data(u_char *packet, char *errmsg, packet_hdrs_t *result) {
-    errmsg[0] = 0;
-    // extract the BPF header
-    struct bpf_hdr_ext *bhephdr = (struct bpf_hdr_ext *)packet;
-    if (bhephdr->bh_hdrlen < sizeof(struct bpf_hdr_ext)) {
-        sprintf(errmsg, "Invalid BPF header length: %hu bytes", bhephdr->bh_hdrlen);
-        memset(result, 0, sizeof(packet_hdrs_t));
-        return NULL;
-    }
-    result->bhep_hdr = bhephdr;
-
-    // extract the PKTAP header
-    struct pktap_header *pktap_hdr = (struct pktap_header *)(packet + bhephdr->bh_hdrlen);
-    if (pktap_hdr->pth_length < sizeof(struct pktap_header)) {
-        sprintf(errmsg, "Invalid PKTAP header length: %u bytes", pktap_hdr->pth_length);
-        memset(result, 0, sizeof(packet_hdrs_t));
-        return NULL;
-    }
-    result->pktap_hdr = pktap_hdr;
-
-    return divert_dump_ethernet_data((u_char *)pktap_hdr + pktap_hdr->pth_length, errmsg, result);
+inline static int valid_ip_header(u_char *data) {
+    struct ip *ip_hdr = (struct ip *)data;
+    return (IP_VHL_HL(ip_hdr->ip_vhl) * 4u >= MIN_IP_HEADER_SIZE);
 }
 
-u_char *divert_dump_ethernet_data(u_char *packet, char *errmsg, packet_hdrs_t *result) {
+u_char *divert_dump_packet(u_char *packet, packet_hdrs_t *result,
+                           u_int32_t flags, char *errmsg) {
     errmsg[0] = 0;
-    /* The Ethernet Data Link header */
-    struct ether_header *ethernet_hdr = (struct ether_header *)(packet);
-    result->ether_hdr = ethernet_hdr;
+    memset(result, 0, sizeof(packet_hdrs_t));
+    u_char *entry = packet;
 
-    return divert_dump_ip_data(packet + ETHER_HDR_LEN, errmsg, result);
-}
-
-u_char *divert_dump_ip_data(u_char *packet, char *errmsg, packet_hdrs_t *result) {
-    errmsg[0] = 0;
-
-    struct ip *ip_hdr = (struct ip *)packet;         /* define/compute ip header offset */
-    struct tcphdr *tcp_hdr = NULL;                   /* The TCP header */
-    struct udphdr *udp_hdr = NULL;                   /* The packet payload */
-    u_char *payload = NULL;                          /* Packet payload */
-
-    size_t size_ip = 0;
-    size_t size_tcp = 0;
-    size_t size_udp = 0;
-    size_t size_payload = 0;
-
-    result->ip_hdr = ip_hdr;
-    result->tcp_hdr = NULL;
-    result->udp_hdr = NULL;
-    result->payload = NULL;
-    result->size_ip = 0;
-    result->size_tcp = 0;
-    result->size_udp = 0;
-    result->size_payload = 0;
-
-    size_ip = IP_VHL_HL(ip_hdr->ip_vhl) * 4u;
-    if (size_ip < 20) {
-        sprintf(errmsg, "Invalid IP header length: %zu bytes", size_ip);
-        memset(result, 0, sizeof(packet_hdrs_t));
-        return NULL;
-    }
-    result->size_ip = size_ip;
-
-    /*
-     * Determine protocol
-     * But we only handle TCP and UDP here
-     */
-    switch (ip_hdr->ip_p) {
-        case IPPROTO_TCP:
-            tcp_hdr = (struct tcphdr *)(packet + size_ip);
-            break;
-        case IPPROTO_UDP:
-            udp_hdr = (struct udphdr *)(packet + size_ip);
-            break;
-        default:
-            return NULL;
-    }
-
-    result->tcp_hdr = tcp_hdr;
-    result->udp_hdr = udp_hdr;
-
-    if (tcp_hdr != NULL) {
-        /*
-         *  OK, this packet is TCP.
-         *  Define/compute tcp header offset
-         */
-        size_tcp = tcp_hdr->th_off * 4;
-        if (size_tcp < 20) {
-            sprintf(errmsg, "Invalid TCP header length: %zu bytes", size_tcp);
+    if (flags & DIVERT_DUMP_BPF_HERDER) {
+        // extract the BPF header
+        struct bpf_hdr_ext *bhephdr = (struct bpf_hdr_ext *)entry;
+        if (bhephdr->bh_hdrlen < sizeof(struct bpf_hdr_ext)) {
+            sprintf(errmsg, "Invalid BPF header length: %hu bytes", bhephdr->bh_hdrlen);
             memset(result, 0, sizeof(packet_hdrs_t));
             return NULL;
         }
-        result->size_tcp = size_tcp;
-        /* define/compute tcp payload (segment) offset */
-        payload = packet + size_ip + size_tcp;
-        /* compute tcp payload (segment) size */
-        size_payload = ntohs(ip_hdr->ip_len) - (size_ip + size_tcp);
-    } else if (udp_hdr != NULL) {
-        /*
-         *  Oh, this packet is UDP.
-         */
-        size_udp = sizeof(struct udphdr);
-        result->size_udp = size_udp;
-        payload = packet + size_ip + size_udp;
-        size_payload = ntohs(ip_hdr->ip_len) - (size_ip + size_udp);
+        result->bhep_hdr = bhephdr;
+        entry += bhephdr->bh_hdrlen;
     }
 
-    if (size_payload == 0) {
-        return NULL;
-    } else if ((int)size_payload < 0) {
-        sprintf(errmsg, "Error: payload size is negative");
-        memset(result, 0, sizeof(packet_hdrs_t));
-        return NULL;
-    } else {
-        result->payload = payload;
-        result->size_payload = size_payload;
-        return payload;
+    if (flags & DIVERT_DUMP_PKTAP_HERDER) {
+        // extract the PKTAP header
+        struct pktap_header *pktap_hdr = (struct pktap_header *)entry;
+        if (pktap_hdr->pth_length < sizeof(struct pktap_header)) {
+            sprintf(errmsg, "Invalid PKTAP header length: %u bytes", pktap_hdr->pth_length);
+            memset(result, 0, sizeof(packet_hdrs_t));
+            return NULL;
+        }
+        result->pktap_hdr = pktap_hdr;
+        entry += pktap_hdr->pth_length;
     }
+
+    if (flags & DIVERT_DUMP_ETHER_HERDER) {
+        struct ether_header *ether_hdr = (struct ether_header *)(entry);
+        if (valid_ip_header(entry + ETHER_HDR_LEN)) {
+            entry += ETHER_HDR_LEN;
+        } else if (valid_ip_header(entry + MAGIC_OFFSET)) {
+            entry += MAGIC_OFFSET;
+        } else {
+            sprintf(errmsg, "Invalid IP header, unknown reason");
+            memset(result, 0, sizeof(packet_hdrs_t));
+            return NULL;
+        }
+        result->ether_hdr = ether_hdr;
+    }
+
+    if (flags & DIVERT_DUMP_IP_HEADER) {
+        struct ip *ip_hdr = (struct ip *)entry;          /* define/compute ip header offset */
+        size_t size_ip = IP_VHL_HL(ip_hdr->ip_vhl) * 4u; /* size of IP header */
+
+        struct tcphdr *tcp_hdr = NULL;                   /* The TCP header */
+        struct udphdr *udp_hdr = NULL;                   /* The packet payload */
+        u_char *payload = NULL;                          /* Packet payload */
+        size_t size_tcp = 0;
+        size_t size_udp = 0;
+        size_t size_payload = 0;
+
+        if (size_ip < MIN_IP_HEADER_SIZE) {
+            sprintf(errmsg, "Invalid IP header size: %zu", size_ip);
+            memset(result, 0, sizeof(packet_hdrs_t));
+            return NULL;
+        }
+
+        result->ip_hdr = ip_hdr;
+        result->size_ip = size_ip;
+
+        /*
+         * Determine protocol
+         * But we only handle TCP and UDP here
+         */
+        switch (ip_hdr->ip_p) {
+            case IPPROTO_TCP:
+                tcp_hdr = (struct tcphdr *)(entry + size_ip);
+                break;
+            case IPPROTO_UDP:
+                udp_hdr = (struct udphdr *)(entry + size_ip);
+                break;
+            default:
+                return NULL;
+        }
+
+        result->tcp_hdr = tcp_hdr;
+        result->udp_hdr = udp_hdr;
+
+        if (tcp_hdr != NULL) {
+            /*
+             *  OK, this packet is TCP.
+             *  Define/compute tcp header offset
+             */
+            size_tcp = tcp_hdr->th_off * 4;
+            if (size_tcp < MIN_TCP_HEADER_SIZE) {
+                sprintf(errmsg, "Invalid TCP header length: %zu bytes", size_tcp);
+                memset(result, 0, sizeof(packet_hdrs_t));
+                return NULL;
+            }
+            result->size_tcp = size_tcp;
+            /* define/compute tcp payload (segment) offset */
+            payload = entry + size_ip + size_tcp;
+            /* compute tcp payload (segment) size */
+            size_payload = ntohs(ip_hdr->ip_len) - (size_ip + size_tcp);
+        } else if (udp_hdr != NULL) {
+            /*
+             *  Oh, this packet is UDP.
+             */
+            size_udp = sizeof(struct udphdr);
+            result->size_udp = size_udp;
+            payload = entry + size_ip + size_udp;
+            size_payload = ntohs(ip_hdr->ip_len) - (size_ip + size_udp);
+        }
+
+        if (size_payload == 0) {
+            return NULL;
+        } else if ((int)size_payload < 0) {
+            sprintf(errmsg, "Error: payload size is negative");
+            memset(result, 0, sizeof(packet_hdrs_t));
+            return NULL;
+        } else {
+            result->payload = payload;
+            result->size_payload = size_payload;
+            return payload;
+        }
+    }
+    return NULL;
 }

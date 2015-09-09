@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <netinet/ip_fw.h>
 
 // TODO: 进一步调整这里的防火墙规则
 // 研究一下是不是把icmp加进去
