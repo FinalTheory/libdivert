@@ -6,6 +6,7 @@
 /* Create an empty, bounded, shared FIFO buffer with n slots */
 int divert_buf_init(packet_buf_t *sp, size_t n, char *errmsg) {
     sp->buffer = calloc(n, sizeof(void *));
+    sp->size = 0;
     /* Buffer holds max of n items */
     sp->n = n;
     /* Empty buffer if front == rear */
@@ -48,6 +49,7 @@ void divert_buf_insert(packet_buf_t *sp, void *item) {
     sem_wait(sp->slots);                          /* Wait for available slot */
     pthread_mutex_lock(sp->mutex);                /* Lock the buffer */
     sp->buffer[(++sp->rear) % (sp->n)] = item;    /* Insert the item */
+    sp->size++;
     pthread_mutex_unlock(sp->mutex);              /* Unlock the buffer */
     sem_post(sp->items);                          /* Announce available item */
 }
@@ -58,6 +60,7 @@ void *divert_buf_remove(packet_buf_t *sp) {
     sem_wait(sp->items);                          /* Wait for available item */
     pthread_mutex_lock(sp->mutex);                /* Lock the buffer */
     item = sp->buffer[(++sp->front) % (sp->n)];   /* Remove the item */
+    sp->size--;
     pthread_mutex_unlock(sp->mutex);              /* Unlock the buffer */
     sem_post(sp->slots);                          /* Announce available slot */
     return item;

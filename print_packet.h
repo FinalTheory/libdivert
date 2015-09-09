@@ -14,6 +14,8 @@
 #define PRINT_PROT      (1u << 6)
 #define PRINT_PAYLOAD   (1u << 7)
 
-void divert_print_packet(FILE *fp, u_int32_t flags, packet_hdrs_t *packet_headers);
+void divert_print_packet(FILE *fp, u_int32_t flags,
+                         packet_hdrs_t *packet_headers,
+                         struct pktap_header *pktap_hdr);
 
 #endif //DIVERT_PACKET_HANDLER_H

@@ -6,7 +6,9 @@
 #include <netinet/udp.h>
 
 
-void divert_print_packet(FILE *fp, u_int32_t flags, packet_hdrs_t *packet_headers) {
+void divert_print_packet(FILE *fp, u_int32_t flags,
+                         packet_hdrs_t *packet_headers,
+                         struct pktap_header *pktap_hdr) {
     static u_int32_t count = 1;
     if (flags & PRINT_NEWLINE) {
         puts("");
@@ -14,13 +16,13 @@ void divert_print_packet(FILE *fp, u_int32_t flags, packet_hdrs_t *packet_header
     if (flags & PRINT_INDEX) {
         fprintf(fp, "Packet index %u:\n", count++);
     }
-    if (flags & PRINT_PROC) {
+    if ((flags & PRINT_PROC) && pktap_hdr != NULL) {
         fprintf(fp, "\tProcess information: %s:%d\n",
-                packet_headers->pktap_hdr->pth_comm, packet_headers->pktap_hdr->pth_pid);
+                pktap_hdr->pth_comm, pktap_hdr->pth_pid);
     }
-    if (flags & PRINT_DATA_LINK) {
+    if ((flags & PRINT_DATA_LINK) && pktap_hdr != NULL) {
         fprintf(fp, "\tData Link Type: %s\n",
-                pcap_datalink_val_to_name(packet_headers->pktap_hdr->pth_dlt));
+                pcap_datalink_val_to_name(pktap_hdr->pth_dlt));
     }
 
     /* print source and destination IP addresses */

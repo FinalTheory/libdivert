@@ -8,6 +8,7 @@
 
 typedef struct {
     void **buffer;         /* buffer array */
+    size_t size;
     size_t n;              /* maximum number of slots */
     size_t front;          /* buf[(front+1)%n] is first item */
     size_t rear;           /* buf[rear%n] is last item */
