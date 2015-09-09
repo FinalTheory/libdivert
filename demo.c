@@ -46,10 +46,10 @@ void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, str
 
     // if the packet has process information
     if (pktap_hdr != NULL) {
-//        printf("Send by %s: %d on device: %s\n", pktap_hdr->pth_comm,
-//               pktap_hdr->pth_pid, pktap_hdr->pth_ifname);
+        printf("Send by %s: %d on device: %s\n\n", pktap_hdr->pth_comm,
+               pktap_hdr->pth_pid, pktap_hdr->pth_ifname);
     } else {
-        //divert_print_packet(stderr, ~0u, &packet_hdrs, pktap_hdr);
+        divert_print_packet(stderr, ~0u, &packet_hdrs, pktap_hdr);
     }
 }
 
@@ -57,8 +57,7 @@ int main() {
     // buffer for error information
     char errmsg[PCAP_ERRBUF_SIZE];
     // create a handle for divert object
-    handle = divert_create(1234, DIVERT_FLAG_WITH_PKTAP |
-                                 DIVERT_FLAG_PRECISE_INFO, errmsg);
+    handle = divert_create(1234, DIVERT_FLAG_WITH_PKTAP, errmsg);
 
     // set the error handler to display error information
     divert_set_error_handler(handle, error_handler);

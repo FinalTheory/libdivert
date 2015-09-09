@@ -355,6 +355,19 @@ void divert_loop_with_pktap(divert_t *divert_handle, int count,
 
     while (divert_handle->is_looping) {
         int num_events = kevent(kq, NULL, 0, events, MAX_EVENT_COUNT, NULL);
+        /*
+         * this is a small optimization
+         * ensure that we first read from BPF device
+         * then read and divert packets from socket
+         */
+        if (num_events == 2) {
+            if (events[0].ident == divert_handle->divert_fd) {
+                struct kevent tmp;
+                tmp = events[0];
+                events[0] = events[1];
+                events[1] = tmp;
+            }
+        }
         if (num_events == -1) {
             divert_buf_insert(divert_handle->thread_buffer,
                               divert_new_error_packet(DIVERT_ERROR_KQUEUE));
