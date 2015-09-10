@@ -582,7 +582,7 @@ static void divert_loop_without_pktap(divert_t *divert_handle, int count,
     pthread_create(&divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
 
     while (divert_handle->is_looping) {
-        struct sockaddr *sin = malloc(sin_len);
+        struct sockaddr *sin = calloc(sin_len, sizeof(u_char));
         // returns a packet of IP protocol structure
         num_divert = recvfrom(divert_handle->divert_fd,
                               divert_handle->divert_buffer,
@@ -633,6 +633,23 @@ void divert_loop(divert_t *divert_handle, int count,
     } else {
         divert_loop_without_pktap(divert_handle, count, callback, args);
     }
+}
+
+int divert_is_inbound(struct sockaddr *sin_raw, char *interface) {
+    struct sockaddr_in *sin = (struct sockaddr_in *)sin_raw;
+    if (sin->sin_addr.s_addr != INADDR_ANY) {
+        if (interface != NULL) {
+            strncpy(interface, sin->sin_zero, sizeof(sin->sin_zero));
+        }
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+int divert_is_outbound(struct sockaddr *sin_raw) {
+    struct sockaddr_in *sin = (struct sockaddr_in *)sin_raw;
+    return sin->sin_addr.s_addr == INADDR_ANY;
 }
 
 ssize_t divert_reinject(divert_t *handle, struct ip *packet,

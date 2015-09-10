@@ -148,6 +148,10 @@ int divert_activate(divert_t *divert_handle, char *errmsg);
 void divert_loop(divert_t *divert_handle, int count,
                  divert_callback_t callback, void *args);
 
+int divert_is_inbound(struct sockaddr *sin_raw, char *interface);
+
+int divert_is_outbound(struct sockaddr *sin_raw);
+
 ssize_t divert_reinject(divert_t *handle, struct ip *packet,
                         ssize_t length, struct sockaddr *sin);
 

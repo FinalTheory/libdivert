@@ -57,8 +57,16 @@ void *reinject_packets(void *args) {
 void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, struct sockaddr *sin) {
     socklen_t sin_len = sizeof(struct sockaddr);
     size_t ip_len = ntohs(packet->ip_len);
+    char ifname[8];
 
     if (packet->ip_p == IPPROTO_ICMP) {
+        if (divert_is_inbound(sin, ifname)) {
+            printf("Inbound ICMP packet on %s\n", ifname);
+        } else if (divert_is_outbound(sin)) {
+            puts("Outbound ICMP packet.");
+        } else {
+            puts("Error.");
+        }
         // if this is a ICMP packet, then just delay it
         __tmp_data_type *data = malloc(sizeof(__tmp_data_type));
         data->sin = malloc(sizeof(struct sockaddr));

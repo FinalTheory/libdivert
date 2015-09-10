@@ -1,12 +1,6 @@
 #include "divert.h"
 #include "dump_packet.h"
 #include "print_packet.h"
-#include "net/pktap.h"
-#include "print_data.h"
-#include "queue.h"
-#include <arpa/inet.h>
-#include <string.h>
-#include <unistd.h>
 #include <stdlib.h>
 
 
@@ -35,10 +29,9 @@ void error_handler(u_int64_t flags) {
 void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, struct sockaddr *sin) {
     char errmsg[256];
     packet_hdrs_t packet_hdrs;
-    socklen_t sin_len = sizeof(struct sockaddr);
 
-    sendto(handle->divert_fd, packet,
-           ntohs(packet->ip_len), 0, sin, sin_len);
+    // re-inject packets into TCP/IP stack
+    divert_reinject(handle, packet, -1, sin);
 
     // dump the data of IP packet
     divert_dump_packet((u_char *)packet, &packet_hdrs,
@@ -46,7 +39,7 @@ void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, str
 
     // if the packet has process information
     if (pktap_hdr != NULL) {
-        printf("Send by %s: %d on device: %s\n\n", pktap_hdr->pth_comm,
+        printf("\nSend by %s: %d on device: %s\n", pktap_hdr->pth_comm,
                pktap_hdr->pth_pid, pktap_hdr->pth_ifname);
     } else {
         divert_print_packet(stderr, ~0u, &packet_hdrs, pktap_hdr);
