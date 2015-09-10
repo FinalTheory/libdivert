@@ -33,9 +33,7 @@ divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
     memset(divert_handle, 0, sizeof(divert_t));
 
     divert_handle->flags = flags;
-    divert_handle->divert_port.sin_family = AF_INET;
-    divert_handle->divert_port.sin_port = htons(port_number);
-    divert_handle->divert_port.sin_addr.s_addr = 0;
+    divert_handle->divert_port = port_number;
 
     // set default timeout
     divert_handle->timeout = PACKET_TIME_OUT;
@@ -89,6 +87,13 @@ int divert_set_pcap_filter(divert_t *divert_handle, char *pcap_filter, char *err
         }
     }
     return 0;
+}
+
+int divert_set_filter(divert_t *handle, char *divert_filter, char *errmsg) {
+    // do not use the packet queue
+    // because the size may grow and not cleaned in time
+    handle->flags &= (~DIVERT_FLAG_PRECISE_INFO);
+    return ipfw_setup(divert_filter, (u_short)handle->divert_port, errmsg);
 }
 
 static int divert_init_pcap(divert_t *divert_handle, char *errmsg) {
@@ -159,15 +164,22 @@ static int divert_init_divert_socket(divert_t *divert_handle, char *errmsg) {
         return DIVERT_FAILURE;
     }
 
+    struct sockaddr_in divert_port_addr;
+
+    // fill in the socket address
+    divert_port_addr.sin_family = AF_INET;
+    divert_port_addr.sin_port = htons(divert_handle->divert_port);
+    divert_port_addr.sin_addr.s_addr = 0;
+
     // bind divert socket to port
-    if (bind(divert_handle->divert_fd, (struct sockaddr *)&divert_handle->divert_port,
+    if (bind(divert_handle->divert_fd, (struct sockaddr *)&divert_port_addr,
              sizeof(struct sockaddr_in)) != 0) {
         sprintf(errmsg, "Couldn't bind divert socket to port");
         return DIVERT_FAILURE;
     }
 
     // setup firewall to redirect all traffic to divert socket
-    if (ipfw_setup(divert_handle, errmsg) != 0) {
+    if (ipfw_setup(NULL,(u_short)divert_handle->divert_port, errmsg) != 0) {
         return FIREWALL_FAILURE;
     }
 
@@ -672,7 +684,7 @@ void divert_loop_stop(divert_t *handle) {
 int divert_clean(divert_t *divert_handle, char *errmsg) {
     errmsg[0] = 0;
     // delete ipfw firewall rule
-    if (ipfw_delete(divert_handle, errmsg) != 0) {
+    if (ipfw_flush(errmsg) != 0) {
         return FIREWALL_FAILURE;
     }
 

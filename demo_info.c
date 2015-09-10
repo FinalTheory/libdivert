@@ -52,10 +52,10 @@ int main() {
     // create a handle for divert object
     handle = divert_create(1234, DIVERT_FLAG_WITH_PKTAP, errmsg);
 
-    // set the error handler to display error information
-    divert_set_error_handler(handle, error_handler);
-
     // set the callback function to handle packets
+    divert_set_callback(handle, callback, handle);
+
+    // set the error handler to display error information
     divert_set_error_handler(handle, error_handler);
 
     // activate the divert handler

@@ -23,6 +23,7 @@
 /*
  * default packet parameters
  */
+#define DEFAULT_IPFW_RULE_ID    1
 #define PCAP_DEFAULT_BUFSIZE	524288
 #define PACKET_TIME_OUT         30
 #define PACKET_BUFFER_SIZE      4096
@@ -62,13 +63,7 @@ typedef struct {
      */
     int bpf_fd;                     // file descriptor of BPF device
     int divert_fd;                  // file descriptor of divert socket
-
-    /*
-     * ipfw things
-     */
-    int ipfw_fd;                    // file descriptor of ipfw socket
-    struct ip_fw ipfw_rule;         // ipfw rule data
-    struct sockaddr_in divert_port; // port bind to divert socket
+    int divert_port;                // port bind to divert socket
 
     /*
      * buffer things
@@ -137,6 +132,8 @@ int divert_set_thread_buffer_size(divert_t *handle, size_t bufsize);
 int divert_set_callback(divert_t *handle, divert_callback_t callback, void *args);
 
 int divert_set_error_handler(divert_t *handle, divert_error_handler_t handler);
+
+int divert_set_filter(divert_t *handle, char *divert_filter, char *errmsg);
 
 int divert_set_pcap_filter(divert_t *divert_handle, char *pcap_filter, char *errmsg);
 

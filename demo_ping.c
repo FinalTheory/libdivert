@@ -94,10 +94,10 @@ int main(int argc, char *argv[]) {
     // do not use any flag, just divert all packets
     handle = divert_create(1234, 0u, errmsg);
 
-    // set the error handler to display error information
+    // set the callback function to handle packets
     divert_set_callback(handle, callback, handle);
 
-    // set the callback function to handle packets
+    // set the error handler to display error information
     divert_set_error_handler(handle, error_handler);
 
     // activate the divert handler
