@@ -5,7 +5,7 @@
 
 
 divert_t *handle;
-useconds_t delay = 200;
+useconds_t delay = 400;
 
 void intHandler(int signal) {
     puts("Loop stop by SIGINT.");
@@ -60,20 +60,21 @@ void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, str
     char ifname[8];
 
     if (packet->ip_p == IPPROTO_ICMP) {
+        // if this is a ICMP packet, then just delay it
         if (divert_is_inbound(sin, ifname)) {
+            __tmp_data_type *data = malloc(sizeof(__tmp_data_type));
+            data->sin = malloc(sizeof(struct sockaddr));
+            data->ip_data = malloc(ip_len);
+            memcpy(data->sin, sin, sin_len);
+            memcpy(data->ip_data, packet, ip_len);
+            divert_buf_insert(thread_buffer, data);
             printf("Inbound ICMP packet on %s\n", ifname);
         } else if (divert_is_outbound(sin)) {
-            puts("Outbound ICMP packet.");
+            divert_reinject(handle, packet, -1, sin);
+            puts("Outbound ICMP packet, not delayed.");
         } else {
             puts("Error.");
         }
-        // if this is a ICMP packet, then just delay it
-        __tmp_data_type *data = malloc(sizeof(__tmp_data_type));
-        data->sin = malloc(sizeof(struct sockaddr));
-        data->ip_data = malloc(ip_len);
-        memcpy(data->sin, sin, sin_len);
-        memcpy(data->ip_data, packet, ip_len);
-        divert_buf_insert(thread_buffer, data);
     } else {
         // re-inject the packets without processing
         divert_reinject(handle, packet, -1, sin);
@@ -82,7 +83,7 @@ void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, str
 
 int main(int argc, char *argv[]) {
     if (argc == 2) {
-        delay = (useconds_t)atoi(argv[1]) / 2;
+        delay = (useconds_t)atoi(argv[1]);
     }
 
     // buffer for error information
@@ -94,6 +95,9 @@ int main(int argc, char *argv[]) {
     handle = divert_create(1234, 0u, errmsg);
 
     // set the error handler to display error information
+    divert_set_callback(handle, callback, handle);
+
+    // set the callback function to handle packets
     divert_set_error_handler(handle, error_handler);
 
     // activate the divert handler
@@ -115,9 +119,10 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, intHandler);
 
     printf("Divert socket buffer size: %zu\n", handle->bufsize);
+    puts("Note that ICMP packets to localhost are diverted twice, so the delay time would be double.\n");
 
     // call the main loop
-    divert_loop(handle, -1, callback, handle);
+    divert_loop(handle, -1);
 
     // insert an item to stop the loop of thread
     divert_buf_insert(thread_buffer, NULL);

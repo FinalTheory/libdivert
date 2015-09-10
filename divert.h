@@ -18,6 +18,7 @@
 #define DIVERT_FAILURE      -2
 #define FIREWALL_FAILURE    -3
 #define PCAP_BUFFER_FAILURE -4
+#define CALLBACK_NOT_FOUND  -5
 
 /*
  * default packet parameters
@@ -133,6 +134,8 @@ int divert_set_data_buffer_size(divert_t *handle, size_t bufsize);
 
 int divert_set_thread_buffer_size(divert_t *handle, size_t bufsize);
 
+int divert_set_callback(divert_t *handle, divert_callback_t callback, void *args);
+
 int divert_set_error_handler(divert_t *handle, divert_error_handler_t handler);
 
 int divert_set_pcap_filter(divert_t *divert_handle, char *pcap_filter, char *errmsg);
@@ -145,8 +148,7 @@ int divert_set_pcap_filter(divert_t *divert_handle, char *pcap_filter, char *err
  */
 int divert_activate(divert_t *divert_handle, char *errmsg);
 
-void divert_loop(divert_t *divert_handle, int count,
-                 divert_callback_t callback, void *args);
+void divert_loop(divert_t *divert_handle, int count);
 
 int divert_is_inbound(struct sockaddr *sin_raw, char *interface);
 

@@ -55,6 +55,9 @@ int main() {
     // set the error handler to display error information
     divert_set_error_handler(handle, error_handler);
 
+    // set the callback function to handle packets
+    divert_set_error_handler(handle, error_handler);
+
     // activate the divert handler
     divert_activate(handle, errmsg);
     if (errmsg[0]) {
@@ -68,7 +71,7 @@ int main() {
     printf("BPF buffer size: %zu\n", handle->bufsize);
 
     // call the main loop
-    divert_loop(handle, -1, callback, handle);
+    divert_loop(handle, -1);
 
     // output statics information
     printf("Captured by BPF device: %llu\n", handle->num_captured);

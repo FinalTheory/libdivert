@@ -60,6 +60,12 @@ int divert_set_error_handler(divert_t *handle, divert_error_handler_t handler) {
     return 0;
 }
 
+int divert_set_callback(divert_t *handle, divert_callback_t callback, void *args) {
+    handle->callback = callback;
+    handle->callback_args = args;
+    return 0;
+}
+
 int divert_set_pcap_filter(divert_t *divert_handle, char *pcap_filter, char *errmsg) {
     errmsg[0] = 0;
     /* compiled filter program (expression) */
@@ -205,6 +211,10 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
         return status;
     }
 
+    if (divert_handle->callback == NULL) {
+        sprintf(errmsg, "Error: callback function not set!");
+        return CALLBACK_NOT_FOUND;
+    }
     divert_handle->is_looping = 1;
 
     return 0;
@@ -319,8 +329,7 @@ static u_char divert_extract_IP_port(packet_hdrs_t *packet_hdrs,
     return is_tcpudp;
 }
 
-static void divert_loop_with_pktap(divert_t *divert_handle, int count,
-                                   divert_callback_t callback, void *args) {
+static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
     u_char found_info;
     in_addr_t ip_src, ip_dst;
     u_short port_src, port_dst;
@@ -337,8 +346,6 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count,
     packet_info_t packet_info;
 
     /* store the callback function and arguments into divert handle */
-    divert_handle->callback = callback;
-    divert_handle->callback_args = args;
     ((u_int64_t *)time_info)[0] = divert_handle->timeout;
 
     divert_handle->is_looping = 1;
@@ -559,8 +566,7 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count,
     pthread_join(divert_thread_callback_handle, &ret_val);
 }
 
-static void divert_loop_without_pktap(divert_t *divert_handle, int count,
-                                      divert_callback_t callback, void *args) {
+static void divert_loop_without_pktap(divert_t *divert_handle, int count) {
     // return value of thread
     void *ret_val;
     // number of diverted bytes
@@ -575,8 +581,6 @@ static void divert_loop_without_pktap(divert_t *divert_handle, int count,
     /* store the callback function
      * and arguments into divert handle
      */
-    divert_handle->callback = callback;
-    divert_handle->callback_args = args;
     divert_handle->is_looping = 1;
     divert_handle->num_missed = 0;
     pthread_create(&divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
@@ -626,12 +630,11 @@ static void divert_loop_without_pktap(divert_t *divert_handle, int count,
     pthread_join(divert_thread_callback_handle, &ret_val);
 }
 
-void divert_loop(divert_t *divert_handle, int count,
-                 divert_callback_t callback, void *args) {
+void divert_loop(divert_t *divert_handle, int count) {
     if (divert_handle->flags & DIVERT_FLAG_WITH_PKTAP) {
-        divert_loop_with_pktap(divert_handle, count, callback, args);
+        divert_loop_with_pktap(divert_handle, count);
     } else {
-        divert_loop_without_pktap(divert_handle, count, callback, args);
+        divert_loop_without_pktap(divert_handle, count);
     }
 }
 
