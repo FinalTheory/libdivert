@@ -8,7 +8,8 @@ divert_t *handle;
 useconds_t delay = 200;
 
 void intHandler(int signal) {
-    handle->is_looping = 0;
+    puts("Loop stop by SIGINT.");
+    divert_loop_stop(handle);
 }
 
 void error_handler(u_int64_t flags) {
@@ -60,7 +61,7 @@ void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, str
     size_t ip_len = ntohs(packet->ip_len);
 
     if (packet->ip_p == IPPROTO_ICMP) {
-        // delay for 400ms
+        // if this is a ICMP packet, then just delay it
         __tmp_data_type *data = malloc(sizeof(__tmp_data_type));
         data->sin = malloc(sizeof(struct sockaddr));
         data->ip_data = malloc(ip_len);
@@ -84,8 +85,8 @@ int main(int argc, char *argv[]) {
     void *ret;
 
     // create a handle for divert object
-    handle = divert_create(1234, DIVERT_FLAG_WITH_PKTAP |
-                                 DIVERT_FLAG_PRECISE_INFO, errmsg);
+    // do not use any flag, just divert all packets
+    handle = divert_create(1234, 0u, errmsg);
 
     // set the error handler to display error information
     divert_set_error_handler(handle, error_handler);
@@ -99,17 +100,16 @@ int main(int argc, char *argv[]) {
 
     // allocate buffer for threads
     thread_buffer = malloc(sizeof(packet_buf_t));
-    divert_buf_init(thread_buffer, 1024, errmsg);
+    divert_buf_init(thread_buffer, 4096, errmsg);
 
     // create a new thread to handle the ICMP packets
-    handle->is_looping = 1;
     pthread_t reinject_thread;
     pthread_create(&reinject_thread, NULL, reinject_packets, NULL);
 
     // register signal handler to exit process gracefully
     signal(SIGINT, intHandler);
 
-    printf("BPF buffer size: %zu\n", handle->bufsize);
+    printf("Divert socket buffer size: %zu\n", handle->bufsize);
 
     // call the main loop
     divert_loop(handle, -1, callback, handle);
@@ -118,23 +118,7 @@ int main(int argc, char *argv[]) {
     divert_buf_insert(thread_buffer, NULL);
 
     // output statics information
-    printf("Captured by BPF device: %llu\n", handle->num_captured);
-    printf("Packets without process info: %llu\n", handle->num_missed);
-    printf("Diverted by divert socket with process info: %llu\n", handle->num_diverted);
-    printf("Accuracy: %f\n", (double)handle->num_diverted /
-                             (handle->num_diverted + handle->num_missed));
-
-    /*
-     * output the statics information of libpcap
-     * the dropped packets means that your network is busy
-     * and some packets are dropped without processing
-     * because the processing speed is not fast enough
-     */
-    struct pcap_stat stats;
-    pcap_stats(handle->pcap_handle, &stats);
-    printf("BPF device received: %d, dropped: %d, dropped by driver: %d\n",
-           stats.ps_recv, stats.ps_drop, stats.ps_ifdrop);
-
+    printf("Diverted packets: %llu\n", handle->num_missed);
     pthread_join(reinject_thread, &ret);
     printf("Diverted %d ICMP packets.\n", *(int *)ret);
 

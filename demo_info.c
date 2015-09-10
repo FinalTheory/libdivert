@@ -13,7 +13,8 @@
 divert_t *handle;
 
 void intHandler(int signal) {
-    handle->is_looping = 0;
+    puts("Loop stop by SIGINT.");
+    divert_loop_stop(handle);
 }
 
 void error_handler(u_int64_t flags) {

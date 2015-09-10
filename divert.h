@@ -22,6 +22,7 @@
 /*
  * default packet parameters
  */
+#define PCAP_DEFAULT_BUFSIZE	524288
 #define PACKET_TIME_OUT         30
 #define PACKET_BUFFER_SIZE      4096
 #define PACKET_INFO_CACHE_SIZE  10000

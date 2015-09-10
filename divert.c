@@ -138,12 +138,6 @@ static int divert_init_pcap(divert_t *divert_handle, char *errmsg) {
     divert_handle->bpf_fd = pcap_handle->fd;
     divert_handle->bpf_buffer = pcap_handle->buffer;
     divert_handle->bufsize = (size_t)pcap_handle->bufsize;
-    /* allocate thread buffer to store labeled packet */
-    divert_handle->thread_buffer = malloc(sizeof(packet_buf_t));
-    if (divert_buf_init(divert_handle->thread_buffer,
-                        divert_handle->thread_buffer_size, errmsg) != 0) {
-        return PCAP_BUFFER_FAILURE;
-    }
     // create queue for bpf packets
     divert_handle->bpf_queue = queue_create();
     divert_handle->packet_map = packet_map_create();
@@ -171,6 +165,16 @@ static int divert_init_divert_socket(divert_t *divert_handle, char *errmsg) {
         return FIREWALL_FAILURE;
     }
 
+    /* allocate thread buffer to store labeled packet */
+    divert_handle->thread_buffer = malloc(sizeof(packet_buf_t));
+    if (divert_buf_init(divert_handle->thread_buffer,
+                        divert_handle->thread_buffer_size, errmsg) != 0) {
+        return PCAP_BUFFER_FAILURE;
+    }
+
+    if (divert_handle->bufsize == 0) {
+        divert_handle->bufsize = PCAP_DEFAULT_BUFSIZE;
+    }
     // finally allocate memory for divert buffer
     divert_handle->divert_buffer = malloc((size_t)divert_handle->bufsize);
     memset(divert_handle->divert_buffer, 0, (size_t)divert_handle->bufsize);
@@ -200,6 +204,8 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
     if (status != 0) {
         return status;
     }
+
+    divert_handle->is_looping = 1;
 
     return 0;
 }
@@ -279,6 +285,7 @@ static void *divert_thread_callback(void *arg) {
         }
         // if the cache is too big, and this thread buffer is empty
         if (handle->thread_buffer->size == 0 &&
+            handle->flags & DIVERT_FLAG_WITH_PKTAP &&
             packet_map_get_size(handle->packet_map) > PACKET_INFO_CACHE_SIZE) {
             // then just free it
             packet_map_clean(handle->packet_map);
@@ -312,8 +319,8 @@ static u_char divert_extract_IP_port(packet_hdrs_t *packet_hdrs,
     return is_tcpudp;
 }
 
-void divert_loop_with_pktap(divert_t *divert_handle, int count,
-                            divert_callback_t callback, void *args) {
+static void divert_loop_with_pktap(divert_t *divert_handle, int count,
+                                   divert_callback_t callback, void *args) {
     u_char found_info;
     in_addr_t ip_src, ip_dst;
     u_short port_src, port_dst;
@@ -552,13 +559,75 @@ void divert_loop_with_pktap(divert_t *divert_handle, int count,
     pthread_join(divert_thread_callback_handle, &ret_val);
 }
 
-void divert_loop_without_pktap(divert_t *divert_handle, int count,
-                               divert_callback_t callback, void *args) {
-    fputs("This function is not yet implemented.", stderr);
+static void divert_loop_without_pktap(divert_t *divert_handle, int count,
+                                      divert_callback_t callback, void *args) {
+    // return value of thread
+    void *ret_val;
+    // number of diverted bytes
+    ssize_t num_divert;
+    // struct to hold packet headers
+    packet_hdrs_t packet_hdrs;
+    // error message buffer
+    char errmsg[PCAP_ERRBUF_SIZE];
+    pthread_t divert_thread_callback_handle;
+    socklen_t sin_len = sizeof(struct sockaddr);
+
+    /* store the callback function
+     * and arguments into divert handle
+     */
+    divert_handle->callback = callback;
+    divert_handle->callback_args = args;
+    divert_handle->is_looping = 1;
+    divert_handle->num_missed = 0;
+    pthread_create(&divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
+
+    while (divert_handle->is_looping) {
+        struct sockaddr *sin = malloc(sin_len);
+        // returns a packet of IP protocol structure
+        num_divert = recvfrom(divert_handle->divert_fd,
+                              divert_handle->divert_buffer,
+                              divert_handle->bufsize, 0,
+                              sin, &sin_len);
+
+        if (num_divert > 0) {
+            // extract the headers of current packet
+            divert_dump_packet(divert_handle->divert_buffer,
+                               &packet_hdrs, DIVERT_DUMP_IP_HEADER, errmsg);
+            if (packet_hdrs.size_ip) {
+                // if packet is not found in the queue, then just send it to user
+                size_t ip_length = ntohs(packet_hdrs.ip_hdr->ip_len);
+                packet_info_t *new_packet = malloc(sizeof(packet_info_t));
+                new_packet->sin = sin;
+                new_packet->time_stamp = DIVERT_RAW_IP_PACKET;
+                // but the packet information is NULL
+                new_packet->pktap_hdr = NULL;
+                // allocate memory
+                new_packet->ip_data = malloc(ip_length);
+                // and copy data
+                memcpy(new_packet->ip_data, packet_hdrs.ip_hdr, ip_length);
+                divert_buf_insert(divert_handle->thread_buffer, new_packet);
+                divert_handle->num_missed++;
+            }
+        } else {
+            // no valid data, so insert a flag into thread buffer
+            divert_buf_insert(divert_handle->thread_buffer,
+                              divert_new_error_packet(DIVERT_ERROR_DIVERT_NODATA));
+            free(sin);
+        }
+        if (count > 0 && divert_handle->num_missed > count) {
+            divert_handle->is_looping = 0;
+            break;
+        }
+    }
+    // insert an item into the thread buffer to stop another thread
+    divert_buf_insert(divert_handle->thread_buffer,
+                      divert_new_error_packet(DIVERT_STOP_LOOP));
+    // wait until the child thread is stopped
+    pthread_join(divert_thread_callback_handle, &ret_val);
 }
 
 void divert_loop(divert_t *divert_handle, int count,
-                            divert_callback_t callback, void *args) {
+                 divert_callback_t callback, void *args) {
     if (divert_handle->flags & DIVERT_FLAG_WITH_PKTAP) {
         divert_loop_with_pktap(divert_handle, count, callback, args);
     } else {
