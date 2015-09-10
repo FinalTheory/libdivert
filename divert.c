@@ -635,6 +635,16 @@ void divert_loop(divert_t *divert_handle, int count,
     }
 }
 
+ssize_t divert_reinject(divert_t *handle, struct ip *packet,
+                        ssize_t length, struct sockaddr *sin) {
+    socklen_t sin_len = sizeof(struct sockaddr);
+    if (length < 0) {
+        length = ntohs(((struct ip *)packet)->ip_len);
+    }
+    return sendto(handle->divert_fd, packet,
+                  (size_t)length, 0, sin, sin_len);
+}
+
 void divert_loop_stop(divert_t *handle) {
     handle->is_looping = 0;
 }

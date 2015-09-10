@@ -148,6 +148,9 @@ int divert_activate(divert_t *divert_handle, char *errmsg);
 void divert_loop(divert_t *divert_handle, int count,
                  divert_callback_t callback, void *args);
 
+ssize_t divert_reinject(divert_t *handle, struct ip *packet,
+                        ssize_t length, struct sockaddr *sin);
+
 void divert_loop_stop(divert_t *handle);
 
 /*

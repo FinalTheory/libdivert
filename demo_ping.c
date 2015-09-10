@@ -37,7 +37,6 @@ typedef struct {
 void *reinject_packets(void *args) {
     int *count = malloc(sizeof(int));
     *count = 0;
-    socklen_t sin_len = sizeof(struct sockaddr);
 
     while (handle->is_looping) {
         __tmp_data_type *data = divert_buf_remove(thread_buffer);
@@ -46,8 +45,7 @@ void *reinject_packets(void *args) {
         }
         // sleep for 200ms
         usleep(delay * 1000);
-        sendto(handle->divert_fd, data->ip_data,
-               ntohs(data->ip_data->ip_len), 0, data->sin, sin_len);
+        divert_reinject(handle, data->ip_data, -1, data->sin);
         free(data->ip_data);
         free(data->sin);
         free(data);
@@ -70,8 +68,7 @@ void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, str
         divert_buf_insert(thread_buffer, data);
     } else {
         // re-inject the packets without processing
-        sendto(handle->divert_fd, packet,
-               ip_len, 0, sin, sin_len);
+        divert_reinject(handle, packet, -1, sin);
     }
 }
 
