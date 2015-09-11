@@ -1,14 +1,14 @@
 #ifndef LIBDIVERT_DIVERT_H
 #define LIBDIVERT_DIVERT_H
 
+#include "queue.h"
+#include "buffer.h"
 #include "net/bpf.h"
 #include "net/pktap.h"
 #include <netinet/ip.h>
 #include "netinet/ip_fw.h"
 #include "pcap/pcap.h"
 #include "pcap/pcap-int.h"
-#include "queue.h"
-#include "packet_buffer.h"
 #include "packet_info.h"
 
 /*
@@ -36,8 +36,8 @@
  * or just divert the raw IP packets
  */
 
-#define DIVERT_FLAG_WITH_PKTAP   (1)
-#define DIVERT_FLAG_PRECISE_INFO (1 << 1)
+#define DIVERT_FLAG_WITH_PKTAP   (1u)
+#define DIVERT_FLAG_PRECISE_INFO (1u << 1)
 
 /*
  * flags for packet buffer and error handling

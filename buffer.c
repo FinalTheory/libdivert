@@ -1,7 +1,7 @@
-#include "packet_buffer.h"
+#include "buffer.h"
 #include <stdlib.h>
-#include <stdio.h>
 #include <pthread.h>
+
 
 /* Create an empty, bounded, shared FIFO buffer with n slots */
 int divert_buf_init(packet_buf_t *sp, size_t n, char *errmsg) {

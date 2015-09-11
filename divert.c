@@ -1,18 +1,17 @@
 #include "divert.h"
 #include "divert_ipfw.h"
 #include "dump_packet.h"
-#include "print_packet.h"
-#include "print_data.h"
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <errno.h>
 #include <sys/event.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 
-divert_t *global_divert_handle = NULL;
+
+static divert_t *global_divert_handle = NULL;
 
 /*
  * only constant and parameter variables could be assigned here
@@ -45,12 +44,12 @@ divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
 
 int divert_set_data_buffer_size(divert_t *handle, size_t bufsize) {
     handle->bufsize = bufsize;
-    return 1;
+    return 0;
 }
 
 int divert_set_thread_buffer_size(divert_t *handle, size_t bufsize) {
     handle->thread_buffer_size = bufsize;
-    return 1;
+    return 0;
 }
 
 int divert_set_error_handler(divert_t *handle, divert_error_handler_t handler) {
