@@ -3,8 +3,8 @@
 
 #include <semaphore.h>
 
-#define BUF_SEM_SLOT "/divert_buffer_slots"
-#define BUF_SEM_ITEM "/divert_buffer_items"
+#define BUF_SEM_SLOT "/divert_buffer_slots_"
+#define BUF_SEM_ITEM "/divert_buffer_items_"
 
 typedef struct {
     void **buffer;         /* buffer array */

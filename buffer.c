@@ -1,10 +1,22 @@
 #include "buffer.h"
 #include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 #include <pthread.h>
 
+static int num_divert_buffer = 0;
 
 /* Create an empty, bounded, shared FIFO buffer with n slots */
 int divert_buf_init(packet_buf_t *sp, size_t n, char *errmsg) {
+    char num_str[16];
+    char name_items[32];
+    char name_slots[32];
+    sprintf(num_str, "%d", num_divert_buffer++);
+    strcpy(name_items, BUF_SEM_ITEM);
+    strcpy(name_slots, BUF_SEM_SLOT);
+    strcat(name_items, num_str);
+    strcat(name_slots, num_str);
+
     sp->buffer = calloc(n, sizeof(void *));
     sp->size = 0;
     /* Buffer holds max of n items */
@@ -19,12 +31,12 @@ int divert_buf_init(packet_buf_t *sp, size_t n, char *errmsg) {
      * because if previous usage of these semaphores were not deleted
      * then that would affect our new usage in current context
      */
-    sem_unlink(BUF_SEM_ITEM);
-    sem_unlink(BUF_SEM_SLOT);
+    sem_unlink(name_items);
+    sem_unlink(name_slots);
     /* initially, buf has n empty slots */
-    sp->slots = sem_open(BUF_SEM_SLOT, O_CREAT, S_IRUSR | S_IWUSR, n);
+    sp->slots = sem_open(name_slots, O_CREAT, S_IRUSR | S_IWUSR, n);
     /* initially, buf has zero data items */
-    sp->items = sem_open(BUF_SEM_ITEM, O_CREAT, S_IRUSR | S_IWUSR, 0);
+    sp->items = sem_open(name_items, O_CREAT, S_IRUSR | S_IWUSR, 0);
     if (sp->slots == SEM_FAILED ||
         sp->items == SEM_FAILED ||
         sp->buffer == NULL) {
@@ -37,9 +49,7 @@ int divert_buf_init(packet_buf_t *sp, size_t n, char *errmsg) {
 /* Clean up buffer sp */
 void divert_buf_clean(packet_buf_t *sp, char *errmsg) {
     sem_close(sp->items);
-    sem_unlink(BUF_SEM_ITEM);
     sem_close(sp->slots);
-    sem_unlink(BUF_SEM_SLOT);
     pthread_mutex_destroy(sp->mutex);
     free(sp->buffer);
 }
