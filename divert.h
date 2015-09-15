@@ -20,6 +20,7 @@
 #define PCAP_BUFFER_FAILURE -4
 #define CALLBACK_NOT_FOUND  -5
 #define IO_BUFFER_FAILURE   -6
+#define PIPE_OPEN_FAILURE   -7
 
 /*
  * default packet parameters
@@ -30,7 +31,8 @@
 // warning: this value should not greater than SEM_VALUE_MAX
 #define PACKET_BUFFER_SIZE      8192
 #define PACKET_INFO_CACHE_SIZE  10000
-#define MAX_EVENT_COUNT     16
+#define MAX_EVENT_COUNT         16
+#define PIPE_BUFFER_SIZE        8
 
 /*
  * flags to control divert behaviour
@@ -67,6 +69,7 @@ typedef struct {
     int bpf_fd;                     // file descriptor of BPF device
     int divert_fd;                  // file descriptor of divert socket
     int divert_port;                // port bind to divert socket
+    int pipe_fd[2];                 // use pipe descriptor to end event loop gracefully
 
     /*
      * buffer things
