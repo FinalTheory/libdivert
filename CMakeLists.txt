@@ -12,13 +12,28 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall --std=c++11")
 
 include_directories(./include ./)
 
-set(LIB_SOURCE_FILES divert.c divert_ipfw.c print_data.c print_packet.c queue.c dump_packet.c buffer.c packet_info.cpp ipfw_utils.c)
+set(LIB_SOURCE_FILES
+        divert.c
+        divert_ipfw.c
+        print_data.c
+        print_packet.c
+        queue.c
+        buffer.c
+        dump_packet.c
+        packet_info.cpp
+        ipfw_utils.c)
 
 add_library(divert SHARED ${LIB_SOURCE_FILES})
 target_link_libraries(divert pcap)
 
-add_executable(demo_info demo/packet_info.c)
+
+# below executables are demos
+
+add_executable(demo_info demo/packet_detail.c)
 target_link_libraries(demo_info pcap divert)
+
+add_executable(demo_blockIO demo/packet_detail_blockio.c)
+target_link_libraries(demo_blockIO pcap divert)
 
 add_executable(divert_ping demo/divert_ping.c)
 target_link_libraries(divert_ping pcap divert)

@@ -19,14 +19,16 @@
 #define FIREWALL_FAILURE    -3
 #define PCAP_BUFFER_FAILURE -4
 #define CALLBACK_NOT_FOUND  -5
+#define IO_BUFFER_FAILURE   -6
 
 /*
  * default packet parameters
  */
 #define DEFAULT_IPFW_RULE_ID    1
-#define PCAP_DEFAULT_BUFSIZE	524288
+#define PCAP_DEFAULT_BUFSIZE    524288
 #define PACKET_TIME_OUT         30
-#define PACKET_BUFFER_SIZE      4096
+// warning: this value should not greater than SEM_VALUE_MAX
+#define PACKET_BUFFER_SIZE      8192
 #define PACKET_INFO_CACHE_SIZE  10000
 #define MAX_EVENT_COUNT     16
 
@@ -38,6 +40,7 @@
 
 #define DIVERT_FLAG_WITH_PKTAP   (1u)
 #define DIVERT_FLAG_PRECISE_INFO (1u << 1)
+#define DIVERT_FLAG_BLOCK_IO     (1u << 2)
 
 /*
  * flags for packet buffer and error handling
@@ -78,9 +81,14 @@ typedef struct {
     pcap_t *pcap_handle;            // handle for pcap structure
     queue_t *bpf_queue;             // handle for queue structure
     packet_buf_t *thread_buffer;    // buffer for labeled packet
+    packet_buf_t *block_io_buffer;  // buffer for blocking IO
     size_t thread_buffer_size;      // buffer size of labeled packet
-    struct packet_map_t *packet_map;// map from packet info (ip src, dst, port src, dst)
-                                    // to its process information
+
+    /*
+     * map from packet info (ip src, dst, port src, dst)
+     * to its process information
+     */
+    struct packet_map_t *packet_map;
 
     /*
      * statics information
@@ -147,6 +155,11 @@ int divert_activate(divert_t *divert_handle, char *errmsg);
 
 void divert_loop(divert_t *divert_handle, int count);
 
+ssize_t divert_read(divert_t *handle,
+                    u_char *pktap_hdr,
+                    u_char *ip_data,
+                    u_char *sin);
+
 int divert_is_inbound(struct sockaddr *sin_raw, char *interface);
 
 int divert_is_outbound(struct sockaddr *sin_raw);
@@ -154,12 +167,14 @@ int divert_is_outbound(struct sockaddr *sin_raw);
 ssize_t divert_reinject(divert_t *handle, struct ip *packet,
                         ssize_t length, struct sockaddr *sin);
 
+int divert_is_looping(divert_t *handle);
+
 void divert_loop_stop(divert_t *handle);
 
 /*
  * this function *SHOULD* be called within the thread you call divert_loop()
  * but *NOT* in the thread you call divert_loop_stop() !
  */
-int divert_clean(divert_t *divert_handle, char *errmsg);
+int divert_close(divert_t *divert_handle, char *errmsg);
 
 #endif //LIBDIVERT_DIVERT_H

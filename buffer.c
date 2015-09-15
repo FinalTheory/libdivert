@@ -1,6 +1,7 @@
 #include "buffer.h"
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <stdio.h>
 #include <pthread.h>
 
@@ -40,6 +41,8 @@ int divert_buf_init(packet_buf_t *sp, size_t n, char *errmsg) {
     if (sp->slots == SEM_FAILED ||
         sp->items == SEM_FAILED ||
         sp->buffer == NULL) {
+        sprintf(errmsg, "Couldn't create buffer, check "
+                "if it is greater than SEM_VALUE_MAX");
         return -1;
     } else {
         return 0;
@@ -56,7 +59,10 @@ void divert_buf_clean(packet_buf_t *sp, char *errmsg) {
 
 /* Insert item onto the rear of shared buffer sp */
 void divert_buf_insert(packet_buf_t *sp, void *item) {
-    sem_wait(sp->slots);                          /* Wait for available slot */
+    int status;
+    do {
+        status = sem_wait(sp->slots);             /* Wait for available slot */
+    } while (status == -1 && errno == EINTR);
     pthread_mutex_lock(sp->mutex);                /* Lock the buffer */
     sp->buffer[(++sp->rear) % (sp->n)] = item;    /* Insert the item */
     sp->size++;
@@ -66,8 +72,11 @@ void divert_buf_insert(packet_buf_t *sp, void *item) {
 
 /* Remove and return the first item from buffer sp */
 void *divert_buf_remove(packet_buf_t *sp) {
+    int status;
     void *item;
-    sem_wait(sp->items);                          /* Wait for available item */
+    do {
+        status = sem_wait(sp->items);             /* Wait for available item */
+    } while (status == -1 && errno == EINTR);
     pthread_mutex_lock(sp->mutex);                /* Lock the buffer */
     item = sp->buffer[(++sp->front) % (sp->n)];   /* Remove the item */
     sp->size--;

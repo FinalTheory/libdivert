@@ -11,8 +11,6 @@
 #include <netinet/udp.h>
 
 
-static divert_t *global_divert_handle = NULL;
-
 /*
  * only constant and parameter variables could be assigned here
  * no dynamic memory allocation
@@ -20,10 +18,6 @@ static divert_t *global_divert_handle = NULL;
  * if called more than twice, it would return the first created handle
  */
 divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
-    if (global_divert_handle != NULL) {
-        return global_divert_handle;
-    }
-
     errmsg[0] = 0;
     divert_t *divert_handle;
     divert_handle = malloc(sizeof(divert_t));
@@ -38,7 +32,6 @@ divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
     divert_handle->timeout = PACKET_TIME_OUT;
     divert_handle->thread_buffer_size = PACKET_BUFFER_SIZE;
 
-    global_divert_handle = divert_handle;
     return divert_handle;
 }
 
@@ -164,6 +157,8 @@ static int divert_init_divert_socket(divert_t *divert_handle, char *errmsg) {
     }
 
     struct sockaddr_in divert_port_addr;
+    // here *MUST* be init although seems no use
+    socklen_t sin_len = sizeof(struct sockaddr);
 
     // fill in the socket address
     divert_port_addr.sin_family = AF_INET;
@@ -173,8 +168,22 @@ static int divert_init_divert_socket(divert_t *divert_handle, char *errmsg) {
     // bind divert socket to port
     if (bind(divert_handle->divert_fd, (struct sockaddr *)&divert_port_addr,
              sizeof(struct sockaddr_in)) != 0) {
-        sprintf(errmsg, "Couldn't bind divert socket to port");
+        sprintf(errmsg, "Couldn't bind divert socket "
+                "to port: %s", strerror(errno));
         return DIVERT_FAILURE;
+    }
+
+    // if this port is auto allocated
+    // then find its real value by getsockname()
+    if (divert_handle->divert_port == 0) {
+        if (getsockname(divert_handle->divert_fd,
+                        (struct sockaddr *)&divert_port_addr, &sin_len) != 0) {
+            sprintf(errmsg, "Couldn't get the address of "
+                    "the divert socket: %s", strerror(errno));
+            return DIVERT_FAILURE;
+        } else {
+            divert_handle->divert_port = ntohs(divert_port_addr.sin_port);
+        }
     }
 
     // setup firewall to redirect all traffic to divert socket
@@ -222,10 +231,21 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
         return status;
     }
 
-    if (divert_handle->callback == NULL) {
-        sprintf(errmsg, "Error: callback function not set!");
-        return CALLBACK_NOT_FOUND;
+    // if uses blocking IO then set the callback to NULL
+    if (divert_handle->flags & DIVERT_FLAG_BLOCK_IO) {
+        divert_handle->callback = NULL;
+        divert_handle->block_io_buffer = malloc(sizeof(packet_buf_t));
+        if (divert_buf_init(divert_handle->block_io_buffer,
+                            PACKET_BUFFER_SIZE, errmsg) != 0) {
+            return IO_BUFFER_FAILURE;
+        }
+    } else {
+        if (divert_handle->callback == NULL) {
+            sprintf(errmsg, "Error: callback function not set!");
+            return CALLBACK_NOT_FOUND;
+        }
     }
+
     divert_handle->is_looping = 1;
 
     return 0;
@@ -285,11 +305,25 @@ static void *divert_thread_callback(void *arg) {
         if (packet->time_stamp &
             (DIVERT_RAW_BPF_PACKET |
              DIVERT_RAW_IP_PACKET)) {
-            callback(callback_args, packet->pktap_hdr,
-                     packet->ip_data, packet->sin);
-            free(packet->ip_data);
-            free(packet->sin);
-            free(packet);
+            // if use block IO, we should not free the packet
+            if (handle->flags & DIVERT_FLAG_BLOCK_IO) {
+                // store this packet into the read buffer
+                if (packet->pktap_hdr != NULL) {
+                    size_t pktap_length = packet->pktap_hdr->pth_length;
+                    // create a new pktap header to avoid memory crash
+                    struct pktap_header *pktap_hdr = malloc(pktap_length);
+                    memcpy(pktap_hdr, packet->pktap_hdr, pktap_length);
+                    packet->pktap_hdr = pktap_hdr;
+                }
+                divert_buf_insert(handle->block_io_buffer, packet);
+            } else {
+                // call the callback function
+                callback(callback_args, packet->pktap_hdr,
+                         packet->ip_data, packet->sin);
+                free(packet->ip_data);
+                free(packet->sin);
+                free(packet);
+            }
         } else if (packet->time_stamp &
                    (DIVERT_ERROR_BPF_INVALID |
                     DIVERT_ERROR_BPF_NODATA |
@@ -301,7 +335,11 @@ static void *divert_thread_callback(void *arg) {
             }
             free(packet);
         } else if (packet->time_stamp & DIVERT_STOP_LOOP) {
-            free(packet);
+            if (handle->flags & DIVERT_FLAG_BLOCK_IO) {
+                divert_buf_insert(handle->block_io_buffer, packet);
+            } else {
+                free(packet);
+            }
             break;
         }
         // if the cache is too big, and this thread buffer is empty
@@ -641,11 +679,41 @@ static void divert_loop_without_pktap(divert_t *divert_handle, int count) {
     pthread_join(divert_thread_callback_handle, &ret_val);
 }
 
+typedef void (*divert_loop_func_t)(divert_t *, int );
+
+// this typedef is only used here
+typedef struct {
+    divert_loop_func_t loop_function;
+    divert_t *divert_handle;
+    int count;
+} __tmp_data_t;
+
+void *divert_non_block_thread(void *args) {
+    __tmp_data_t *data = (__tmp_data_t *)args;
+    data->loop_function(data->divert_handle, data->count);
+    return NULL;
+}
+
 void divert_loop(divert_t *divert_handle, int count) {
+    divert_loop_func_t loop_function;
     if (divert_handle->flags & DIVERT_FLAG_WITH_PKTAP) {
-        divert_loop_with_pktap(divert_handle, count);
+        loop_function = divert_loop_with_pktap;
     } else {
-        divert_loop_without_pktap(divert_handle, count);
+        loop_function = divert_loop_without_pktap;
+    }
+
+    // if use block IO, then
+    // this function should be non-blocking
+    if (divert_handle->flags & DIVERT_FLAG_BLOCK_IO) {
+        __tmp_data_t *args = malloc(sizeof(__tmp_data_t));
+        args->count = count;
+        args->divert_handle = divert_handle;
+        args->loop_function = loop_function;
+        pthread_t non_block_thread;
+        pthread_create(&non_block_thread, NULL, divert_non_block_thread, args);
+        pthread_detach(non_block_thread);
+    } else {
+        loop_function(divert_handle, count);
     }
 }
 
@@ -666,6 +734,42 @@ int divert_is_outbound(struct sockaddr *sin_raw) {
     return sin->sin_addr.s_addr == INADDR_ANY;
 }
 
+ssize_t divert_read(divert_t *handle,
+                    u_char *pktap_hdr,
+                    u_char *ip_data,
+                    u_char *sin) {
+    if (handle->block_io_buffer == NULL) {
+        return -1;
+    } else {
+        packet_info_t *packet =
+                divert_buf_remove(handle->block_io_buffer);
+        if (packet->time_stamp & DIVERT_STOP_LOOP) {
+            free(packet);
+            return -1;
+        }
+        // copy the data to user buffer
+        memcpy(ip_data, packet->ip_data,
+               ntohs(packet->ip_data->ip_len));
+        memcpy(sin, packet->sin, sizeof(struct sockaddr));
+        // if pktap header is not NULL, copy it
+        if (packet->pktap_hdr != NULL) {
+            memcpy(pktap_hdr, packet->pktap_hdr,
+                   packet->pktap_hdr->pth_length);
+        } else {
+            memset(pktap_hdr, 0, sizeof(struct pktap_header));
+        }
+        // free the allocated memory
+        free(packet->ip_data);
+        free(packet->sin);
+        // remember to free the new allocated pktap header if not NULL
+        if (packet->pktap_hdr != NULL) {
+            free(packet->pktap_hdr);
+        }
+        free(packet);
+        return 0;
+    }
+}
+
 ssize_t divert_reinject(divert_t *handle, struct ip *packet,
                         ssize_t length, struct sockaddr *sin) {
     socklen_t sin_len = sizeof(struct sockaddr);
@@ -676,11 +780,15 @@ ssize_t divert_reinject(divert_t *handle, struct ip *packet,
                   (size_t)length, 0, sin, sin_len);
 }
 
+int divert_is_looping(divert_t *handle) {
+    return handle->is_looping;
+}
+
 void divert_loop_stop(divert_t *handle) {
     handle->is_looping = 0;
 }
 
-int divert_clean(divert_t *divert_handle, char *errmsg) {
+int divert_close(divert_t *divert_handle, char *errmsg) {
     errmsg[0] = 0;
     // delete ipfw firewall rule
     if (ipfw_flush(errmsg) != 0) {

@@ -91,8 +91,8 @@ int main(int argc, char *argv[]) {
     void *ret;
 
     // create a handle for divert object
-    // do not use any flag, just divert all packets
-    handle = divert_create(1234, 0u, errmsg);
+    // not using any flag, just divert all packets
+    handle = divert_create(0, 0u, errmsg);
 
     // set the callback function to handle packets
     divert_set_callback(handle, callback, handle);
@@ -133,7 +133,7 @@ int main(int argc, char *argv[]) {
     printf("Diverted %d ICMP packets.\n", *(int *)ret);
 
     // clean the handle to release resources
-    if (divert_clean(handle, errmsg) == 0) {
+    if (divert_close(handle, errmsg) == 0) {
         puts("Successfully cleaned, exit.");
     }
     divert_buf_clean(thread_buffer, errmsg);
