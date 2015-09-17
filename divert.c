@@ -85,6 +85,9 @@ int divert_set_filter(divert_t *handle, char *divert_filter, char *errmsg) {
     // do not use the packet queue
     // because the size may grow and not cleaned in time
     handle->flags &= (~DIVERT_FLAG_PRECISE_INFO);
+    if (ipfw_delete(DEFAULT_IPFW_RULE_ID, errmsg) != 0) {
+        return -1;
+    }
     return ipfw_setup(divert_filter, (u_short)handle->divert_port, errmsg);
 }
 
@@ -843,6 +846,14 @@ void divert_loop_stop(divert_t *handle) {
     char pipe_buf[] = "exit";
     handle->is_looping = 0;
     write(handle->pipe_fd[1], pipe_buf, sizeof(pipe_buf));
+}
+
+int divert_bpf_stats(divert_t *handle, struct pcap_stat *stats) {
+    if (handle->pcap_handle != NULL) {
+        return pcap_stats(handle->pcap_handle, stats);
+    } else {
+        return -1;
+    }
 }
 
 int divert_close(divert_t *divert_handle, char *errmsg) {

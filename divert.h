@@ -84,6 +84,7 @@ typedef struct {
     pcap_t *pcap_handle;            // handle for pcap structure
     queue_t *bpf_queue;             // handle for queue structure
     packet_buf_t *thread_buffer;    // buffer for labeled packet
+    // TODO: free this
     packet_buf_t *block_io_buffer;  // buffer for blocking IO
     size_t thread_buffer_size;      // buffer size of labeled packet
 
@@ -91,6 +92,7 @@ typedef struct {
      * map from packet info (ip src, dst, port src, dst)
      * to its process information
      */
+    // TODO: free this
     struct packet_map_t *packet_map;
 
     /*
@@ -173,6 +175,8 @@ ssize_t divert_reinject(divert_t *handle, struct ip *packet,
 int divert_is_looping(divert_t *handle);
 
 void divert_loop_stop(divert_t *handle);
+
+int divert_bpf_stats(divert_t *handle, struct pcap_stat *stats);
 
 /*
  * this function *SHOULD* be called within the thread you call divert_loop()

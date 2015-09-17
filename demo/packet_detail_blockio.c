@@ -111,7 +111,7 @@ int main() {
      * because the processing speed is not fast enough
      */
     struct pcap_stat stats;
-    pcap_stats(handle->pcap_handle, &stats);
+    divert_bpf_stats(handle, &stats);
     printf("BPF device received: %d, dropped: %d, dropped by driver: %d\n",
            stats.ps_recv, stats.ps_drop, stats.ps_ifdrop);
 
