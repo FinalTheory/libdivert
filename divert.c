@@ -362,6 +362,7 @@ static void *divert_thread_callback(void *arg) {
 #endif
         }
     }
+    handle->is_looping = 0;
     return NULL;
 }
 
@@ -618,7 +619,7 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
                     char pipe_buf[PIPE_BUFFER_SIZE];
                     read(divert_handle->pipe_fd[0], pipe_buf, sizeof(pipe_buf));
                     if (pipe_buf[0] == 'e') {
-                        break;
+                        goto finish;
                     }
                 }
             }
@@ -626,10 +627,11 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
         // increase time stamp
         divert_handle->current_time_stamp++;
         if (count > 0 && divert_handle->num_diverted >= count) {
-            divert_handle->is_looping = 0;
-            break;
+            goto finish;
         }
     }
+    finish:
+    divert_handle->is_looping = 0;
     // insert an item into the thread buffer to stop another thread
     divert_buf_insert(divert_handle->thread_buffer,
                       divert_new_error_packet(DIVERT_STOP_LOOP));
@@ -716,20 +718,21 @@ static void divert_loop_without_pktap(divert_t *divert_handle, int count) {
                         free(sin);
                     }
                     if (count > 0 && divert_handle->num_missed > count) {
-                        divert_handle->is_looping = 0;
-                        break;
+                        goto finish;
                     }
                 } else if (fd == divert_handle->pipe_fd[0]) {
                     // end the event loop
                     char pipe_buf[PIPE_BUFFER_SIZE];
                     read(divert_handle->pipe_fd[0], pipe_buf, sizeof(pipe_buf));
                     if (pipe_buf[0] == 'e') {
-                        break;
+                        goto finish;
                     }
                 }
             }
         }
     }
+    finish:
+    divert_handle->is_looping = 0;
     // insert an item into the thread buffer to stop another thread
     divert_buf_insert(divert_handle->thread_buffer,
                       divert_new_error_packet(DIVERT_STOP_LOOP));
@@ -796,7 +799,9 @@ ssize_t divert_read(divert_t *handle,
                     u_char *pktap_hdr,
                     u_char *ip_data,
                     u_char *sin) {
-    if (handle->block_io_buffer == NULL) {
+    // make it non-blocking if event loop is stopped
+    if (!handle->is_looping ||
+        handle->block_io_buffer == NULL) {
         return -1;
     } else {
         packet_info_t *packet =
@@ -878,6 +883,8 @@ int divert_close(divert_t *divert_handle, char *errmsg) {
     // close the pipe descriptor
     close(divert_handle->pipe_fd[0]);
     close(divert_handle->pipe_fd[1]);
+
+    memset(divert_handle, 0, sizeof(divert_t));
 
     return 0;
 }
