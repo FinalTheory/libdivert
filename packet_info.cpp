@@ -158,3 +158,12 @@ void packet_map_clean(packet_map_t *mp) {
     pthread_create(&clean_thread, NULL, packet_map_clean_thread, thread_data);
     pthread_detach(clean_thread);
 }
+
+void packet_map_free(packet_map_t *mp) {
+    delete mp->memory_pointers;
+    delete mp->packet_map;
+    delete mp->mutex;
+    mp->memory_pointers = NULL;
+    mp->packet_map = NULL;
+    mp->mutex = NULL;
+}

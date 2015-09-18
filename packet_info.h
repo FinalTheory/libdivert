@@ -37,6 +37,8 @@ size_t packet_map_get_size(struct packet_map_t *mp);
 
 void packet_map_clean(struct packet_map_t *mp);
 
+void packet_map_free(struct packet_map_t *mp);
+
 #ifdef  __cplusplus
 }
 #endif

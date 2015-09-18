@@ -1,6 +1,7 @@
 #include "divert.h"
 #include "divert_ipfw.h"
 #include "dump_packet.h"
+#include "buffer.h"
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -237,11 +238,6 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
     // if uses blocking IO then set the callback to NULL
     if (divert_handle->flags & DIVERT_FLAG_BLOCK_IO) {
         divert_handle->callback = NULL;
-        divert_handle->block_io_buffer = malloc(sizeof(packet_buf_t));
-        if (divert_buf_init(divert_handle->block_io_buffer,
-                            PACKET_BUFFER_SIZE, errmsg) != 0) {
-            return IO_BUFFER_FAILURE;
-        }
     } else {
         if (divert_handle->callback == NULL) {
             sprintf(errmsg, "Error: callback function not set!");
@@ -313,25 +309,12 @@ static void *divert_thread_callback(void *arg) {
         if (packet->time_stamp &
             (DIVERT_RAW_BPF_PACKET |
              DIVERT_RAW_IP_PACKET)) {
-            // if use block IO, we should not free the packet
-            if (handle->flags & DIVERT_FLAG_BLOCK_IO) {
-                // store this packet into the read buffer
-                if (packet->pktap_hdr != NULL) {
-                    size_t pktap_length = packet->pktap_hdr->pth_length;
-                    // create a new pktap header to avoid memory crash
-                    struct pktap_header *pktap_hdr = malloc(pktap_length);
-                    memcpy(pktap_hdr, packet->pktap_hdr, pktap_length);
-                    packet->pktap_hdr = pktap_hdr;
-                }
-                divert_buf_insert(handle->block_io_buffer, packet);
-            } else {
-                // call the callback function
-                callback(callback_args, packet->pktap_hdr,
-                         packet->ip_data, packet->sin);
-                free(packet->ip_data);
-                free(packet->sin);
-                free(packet);
-            }
+            // call the callback function
+            callback(callback_args, packet->pktap_hdr,
+                     packet->ip_data, packet->sin);
+            free(packet->ip_data);
+            free(packet->sin);
+            free(packet);
         } else if (packet->time_stamp &
                    (DIVERT_ERROR_BPF_INVALID |
                     DIVERT_ERROR_BPF_NODATA |
@@ -343,11 +326,7 @@ static void *divert_thread_callback(void *arg) {
             }
             free(packet);
         } else if (packet->time_stamp & DIVERT_STOP_LOOP) {
-            if (handle->flags & DIVERT_FLAG_BLOCK_IO) {
-                divert_buf_insert(handle->block_io_buffer, packet);
-            } else {
-                free(packet);
-            }
+            free(packet);
             break;
         }
         // if the cache is too big, and this thread buffer is empty
@@ -411,7 +390,11 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
     divert_handle->num_diverted = 0;
     divert_handle->num_captured = 0;
     divert_handle->current_time_stamp = 0;
-    pthread_create(&divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
+
+    // only start new thread in non-blocking mode
+    if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
+        pthread_create(&divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
+    }
 
     /* register two file descriptor into kqueue */
     int kq = kqueue();
@@ -635,8 +618,11 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
     // insert an item into the thread buffer to stop another thread
     divert_buf_insert(divert_handle->thread_buffer,
                       divert_new_error_packet(DIVERT_STOP_LOOP));
-    // wait until the child thread is stopped
-    pthread_join(divert_thread_callback_handle, &ret_val);
+
+    if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
+        // wait until the child thread is stopped
+        pthread_join(divert_thread_callback_handle, &ret_val);
+    }
 }
 
 static void divert_loop_without_pktap(divert_t *divert_handle, int count) {
@@ -656,7 +642,10 @@ static void divert_loop_without_pktap(divert_t *divert_handle, int count) {
      */
     divert_handle->is_looping = 1;
     divert_handle->num_missed = 0;
-    pthread_create(&divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
+    // only start new thread in non-blocking mode
+    if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
+        pthread_create(&divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
+    }
 
     /* register two file descriptor into kqueue */
     int kq = kqueue();
@@ -736,8 +725,11 @@ static void divert_loop_without_pktap(divert_t *divert_handle, int count) {
     // insert an item into the thread buffer to stop another thread
     divert_buf_insert(divert_handle->thread_buffer,
                       divert_new_error_packet(DIVERT_STOP_LOOP));
-    // wait until the child thread is stopped
-    pthread_join(divert_thread_callback_handle, &ret_val);
+
+    if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
+        // wait until the child thread is stopped
+        pthread_join(divert_thread_callback_handle, &ret_val);
+    }
 }
 
 typedef void (*divert_loop_func_t)(divert_t *, int);
@@ -801,35 +793,53 @@ ssize_t divert_read(divert_t *handle,
                     u_char *sin) {
     // make it non-blocking if event loop is stopped
     if (!handle->is_looping ||
-        handle->block_io_buffer == NULL) {
-        return -1;
+        handle->thread_buffer == NULL) {
+        return DIVERT_READ_EOF;
     } else {
         packet_info_t *packet =
-                divert_buf_remove(handle->block_io_buffer);
-        if (packet->time_stamp & DIVERT_STOP_LOOP) {
+                divert_buf_remove(handle->thread_buffer);
+        // do flag checking
+        if (packet->time_stamp &
+            (DIVERT_RAW_BPF_PACKET |
+             DIVERT_RAW_IP_PACKET)) {
+            // copy the data to user buffer
+            memcpy(ip_data, packet->ip_data,
+                   ntohs(packet->ip_data->ip_len));
+            memcpy(sin, packet->sin, sizeof(struct sockaddr));
+            // if pktap header is not NULL, copy it
+            if (packet->pktap_hdr != NULL) {
+                memcpy(pktap_hdr, packet->pktap_hdr,
+                       packet->pktap_hdr->pth_length);
+            } else {
+                memset(pktap_hdr, 0, sizeof(struct pktap_header));
+            }
+            // free the allocated memory
+            free(packet->ip_data);
+            free(packet->sin);
             free(packet);
-            return -1;
-        }
-        // copy the data to user buffer
-        memcpy(ip_data, packet->ip_data,
-               ntohs(packet->ip_data->ip_len));
-        memcpy(sin, packet->sin, sizeof(struct sockaddr));
-        // if pktap header is not NULL, copy it
-        if (packet->pktap_hdr != NULL) {
-            memcpy(pktap_hdr, packet->pktap_hdr,
-                   packet->pktap_hdr->pth_length);
+            return 0;
+        } else if (packet->time_stamp &
+                   (DIVERT_ERROR_BPF_INVALID |
+                    DIVERT_ERROR_BPF_NODATA |
+                    DIVERT_ERROR_DIVERT_NODATA |
+                    DIVERT_ERROR_KQUEUE)) {
+            free(packet);
+            return (int)packet->time_stamp;
+        } else if (packet->time_stamp & DIVERT_STOP_LOOP) {
+            free(packet);
+            handle->is_looping = 0;
+            return DIVERT_READ_EOF;
         } else {
-            memset(pktap_hdr, 0, sizeof(struct pktap_header));
+            return DIVERT_READ_UNKNOWN_FLAG;
         }
-        // free the allocated memory
-        free(packet->ip_data);
-        free(packet->sin);
-        // remember to free the new allocated pktap header if not NULL
-        if (packet->pktap_hdr != NULL) {
-            free(packet->pktap_hdr);
+
+        // if the cache is too big, and this thread buffer is empty
+        if (handle->thread_buffer->size == 0 &&
+            handle->flags & DIVERT_FLAG_WITH_PKTAP &&
+            packet_map_get_size(handle->packet_map) > PACKET_INFO_CACHE_SIZE) {
+            // then just free it
+            packet_map_clean(handle->packet_map);
         }
-        free(packet);
-        return 0;
     }
 }
 
@@ -872,12 +882,13 @@ int divert_close(divert_t *divert_handle, char *errmsg) {
     close(divert_handle->divert_fd);
     if (divert_handle->divert_buffer != NULL) {
         free(divert_handle->divert_buffer);
+        divert_buf_clean(divert_handle->thread_buffer, errmsg);
     }
 
     // close the pcap handler and clean the thread buffer
     if (divert_handle->flags & DIVERT_FLAG_WITH_PKTAP) {
         pcap_close(divert_handle->pcap_handle);
-        divert_buf_clean(divert_handle->thread_buffer, errmsg);
+        packet_map_free(divert_handle->packet_map);
     }
 
     // close the pipe descriptor

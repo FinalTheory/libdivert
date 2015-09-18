@@ -71,7 +71,7 @@ int main() {
                                      packet_buf, sin_buf);
 
         // the handle is closed, then just break the loop
-        if (status == -1) {
+        if (status == DIVERT_READ_EOF) {
             break;
         }
 

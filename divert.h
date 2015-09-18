@@ -47,6 +47,8 @@
 /*
  * flags for packet buffer and error handling
  */
+#define DIVERT_READ_EOF             (-1)
+#define DIVERT_READ_UNKNOWN_FLAG    (-2)
 #define DIVERT_RAW_BPF_PACKET       (1u)
 #define DIVERT_RAW_IP_PACKET        (1u << 1)
 #define DIVERT_ERROR_BPF_INVALID    (1u << 2)
@@ -84,15 +86,12 @@ typedef struct {
     pcap_t *pcap_handle;            // handle for pcap structure
     queue_t *bpf_queue;             // handle for queue structure
     packet_buf_t *thread_buffer;    // buffer for labeled packet
-    // TODO: free this
-    packet_buf_t *block_io_buffer;  // buffer for blocking IO
     size_t thread_buffer_size;      // buffer size of labeled packet
 
     /*
      * map from packet info (ip src, dst, port src, dst)
      * to its process information
      */
-    // TODO: free this
     struct packet_map_t *packet_map;
 
     /*
