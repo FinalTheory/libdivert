@@ -72,6 +72,7 @@ typedef struct {
     int divert_fd;                  // file descriptor of divert socket
     int divert_port;                // port bind to divert socket
     int pipe_fd[2];                 // use pipe descriptor to end event loop gracefully
+    int exit_fd[2];                 // use pipe descriptor to wait event loop gracefully
 
     /*
      * buffer things

@@ -1,7 +1,7 @@
 #include "divert.h"
 #include "divert_ipfw.h"
 #include "dump_packet.h"
-#include "buffer.h"
+#include "assert.h"
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -245,7 +245,8 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
         }
     }
 
-    if (pipe(divert_handle->pipe_fd) != 0) {
+    if (pipe(divert_handle->pipe_fd) != 0 ||
+        pipe(divert_handle->exit_fd) != 0) {
         sprintf(errmsg, "Could not create pipe: %s", strerror(errno));
         return PIPE_OPEN_FAILURE;
     }
@@ -623,6 +624,9 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
         // wait until the child thread is stopped
         pthread_join(divert_thread_callback_handle, &ret_val);
     }
+
+    char exit_str[] = "success";
+    write(divert_handle->exit_fd[1], exit_str, sizeof(exit_str));
 }
 
 static void divert_loop_without_pktap(divert_t *divert_handle, int count) {
@@ -730,6 +734,9 @@ static void divert_loop_without_pktap(divert_t *divert_handle, int count) {
         // wait until the child thread is stopped
         pthread_join(divert_thread_callback_handle, &ret_val);
     }
+
+    char exit_str[] = "success";
+    write(divert_handle->exit_fd[1], exit_str, sizeof(exit_str));
 }
 
 typedef void (*divert_loop_func_t)(divert_t *, int);
@@ -873,6 +880,11 @@ int divert_bpf_stats(divert_t *handle, struct pcap_stat *stats) {
 
 int divert_close(divert_t *divert_handle, char *errmsg) {
     errmsg[0] = 0;
+
+    char str_buf[PIPE_BUFFER_SIZE];
+    read(divert_handle->exit_fd[0], str_buf, sizeof(str_buf));
+    assert(str_buf[0] == 's');
+
     // delete ipfw firewall rule
     if (ipfw_flush(errmsg) != 0) {
         return FIREWALL_FAILURE;
@@ -894,6 +906,8 @@ int divert_close(divert_t *divert_handle, char *errmsg) {
     // close the pipe descriptor
     close(divert_handle->pipe_fd[0]);
     close(divert_handle->pipe_fd[1]);
+    close(divert_handle->exit_fd[0]);
+    close(divert_handle->exit_fd[1]);
 
     memset(divert_handle, 0, sizeof(divert_t));
 
