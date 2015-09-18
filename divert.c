@@ -372,7 +372,7 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
     in_addr_t ip_src, ip_dst;
     u_short port_src, port_dst;
     void *ret_val;
-    pthread_t divert_thread_callback_handle;
+    pthread_t *divert_thread_callback_handle = calloc(1, sizeof(pthread_t));
     ssize_t num_divert, num_bpf;
     queue_node_t *node;
     void *time_info = malloc(2 * sizeof(u_int64_t));
@@ -394,7 +394,7 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
 
     // only start new thread in non-blocking mode
     if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
-        pthread_create(&divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
+        pthread_create(divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
     }
 
     /* register two file descriptor into kqueue */
@@ -622,7 +622,7 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
 
     if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
         // wait until the child thread is stopped
-        pthread_join(divert_thread_callback_handle, &ret_val);
+        pthread_join(*divert_thread_callback_handle, &ret_val);
     }
 
     char exit_str[] = "success";
@@ -638,7 +638,7 @@ static void divert_loop_without_pktap(divert_t *divert_handle, int count) {
     packet_hdrs_t packet_hdrs;
     // error message buffer
     char errmsg[PCAP_ERRBUF_SIZE];
-    pthread_t divert_thread_callback_handle;
+    pthread_t *divert_thread_callback_handle = calloc(1, sizeof(pthread_t));
     socklen_t sin_len = sizeof(struct sockaddr);
 
     /* store the callback function
@@ -648,7 +648,7 @@ static void divert_loop_without_pktap(divert_t *divert_handle, int count) {
     divert_handle->num_missed = 0;
     // only start new thread in non-blocking mode
     if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
-        pthread_create(&divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
+        pthread_create(divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
     }
 
     /* register two file descriptor into kqueue */
@@ -732,7 +732,7 @@ static void divert_loop_without_pktap(divert_t *divert_handle, int count) {
 
     if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
         // wait until the child thread is stopped
-        pthread_join(divert_thread_callback_handle, &ret_val);
+        pthread_join(*divert_thread_callback_handle, &ret_val);
     }
 
     char exit_str[] = "success";
