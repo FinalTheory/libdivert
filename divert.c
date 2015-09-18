@@ -798,10 +798,11 @@ ssize_t divert_read(divert_t *handle,
                     u_char *pktap_hdr,
                     u_char *ip_data,
                     u_char *sin) {
+    int ret_val = 0;
     // make it non-blocking if event loop is stopped
     if (!handle->is_looping ||
         handle->thread_buffer == NULL) {
-        return DIVERT_READ_EOF;
+        ret_val = DIVERT_READ_EOF;
     } else {
         packet_info_t *packet =
                 divert_buf_remove(handle->thread_buffer);
@@ -824,20 +825,20 @@ ssize_t divert_read(divert_t *handle,
             free(packet->ip_data);
             free(packet->sin);
             free(packet);
-            return 0;
+            ret_val = 0;
         } else if (packet->time_stamp &
                    (DIVERT_ERROR_BPF_INVALID |
                     DIVERT_ERROR_BPF_NODATA |
                     DIVERT_ERROR_DIVERT_NODATA |
                     DIVERT_ERROR_KQUEUE)) {
             free(packet);
-            return (int)packet->time_stamp;
+            ret_val = (int)packet->time_stamp;
         } else if (packet->time_stamp & DIVERT_STOP_LOOP) {
             free(packet);
             handle->is_looping = 0;
-            return DIVERT_READ_EOF;
+            ret_val = DIVERT_READ_EOF;
         } else {
-            return DIVERT_READ_UNKNOWN_FLAG;
+            ret_val = DIVERT_READ_UNKNOWN_FLAG;
         }
 
         // if the cache is too big, and this thread buffer is empty
@@ -848,6 +849,7 @@ ssize_t divert_read(divert_t *handle,
             packet_map_clean(handle->packet_map);
         }
     }
+    return ret_val;
 }
 
 ssize_t divert_reinject(divert_t *handle, struct ip *packet,
