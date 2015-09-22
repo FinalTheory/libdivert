@@ -1,9 +1,22 @@
 #include "dump_packet.h"
 #include "divert.h"
+#include <stdlib.h>
 #include <string.h>
 #include <net/ethernet.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
+
+/*
+ * The DLT_NULL packet header is 4 bytes long. It contains a host-byte-order
+ * 32-bit integer that specifies the family, e.g. AF_INET.
+ *
+ * Note here that "host" refers to the host on which the packets were
+ * captured; that isn't necessarily *this* host.
+ *
+ * The OpenBSD DLT_LOOP packet header is the same, except that the integer
+ * is in network byte order.
+ */
+#define	NULL_HDRLEN 4
 
 /*
  * Packet structure captured by BPF device
@@ -19,7 +32,8 @@
     |       See also: [2]       |
     +---------------------------+
     |      ETHERNET header      |
-    |       (DLT_EN10MB)        |
+    |             or            |
+    |       DLT_NULL header     |
     +---------------------------+
     |         IP header         |
     |                           |
@@ -35,6 +49,18 @@
 inline static int valid_ip_header(u_char *data) {
     struct ip *ip_hdr = (struct ip *)data;
     return (IP_VHL_HL(ip_hdr->ip_vhl) * 4u >= MIN_IP_HEADER_SIZE);
+}
+
+inline static ssize_t get_offset_by_dlt(int dlt) {
+    switch (dlt) {
+        case DLT_EN10MB:
+            return ETHER_HDR_LEN;
+        case DLT_NULL:
+        case DLT_LOOP:
+            return NULL_HDRLEN;
+        default:
+            return -1;
+    }
 }
 
 u_char *divert_dump_packet(u_char *packet, packet_hdrs_t *result,
@@ -69,14 +95,25 @@ u_char *divert_dump_packet(u_char *packet, packet_hdrs_t *result,
 
     if (flags & DIVERT_DUMP_ETHER_HERDER) {
         struct ether_header *ether_hdr = (struct ether_header *)(entry);
-        if (valid_ip_header(entry + ETHER_HDR_LEN)) {
-            entry += ETHER_HDR_LEN;
-        } else if (valid_ip_header(entry + MAGIC_OFFSET)) {
-            entry += MAGIC_OFFSET;
+        if (result->pktap_hdr != NULL) {
+            ssize_t offset = get_offset_by_dlt(result->pktap_hdr->pth_dlt);
+            if (offset != -1) {
+                entry += offset;
+            } else {
+                sprintf(errmsg, "Invalid datalink type.");
+                memset(result, 0, sizeof(packet_hdrs_t));
+                return NULL;
+            }
         } else {
-            sprintf(errmsg, "Invalid IP header, unknown reason");
-            memset(result, 0, sizeof(packet_hdrs_t));
-            return NULL;
+            if (valid_ip_header(entry + ETHER_HDR_LEN)) {
+                entry += ETHER_HDR_LEN;
+            } else if (valid_ip_header(entry + NULL_HDRLEN)) {
+                entry += NULL_HDRLEN;
+            } else {
+                sprintf(errmsg, "Invalid IP header, unknown reason");
+                memset(result, 0, sizeof(packet_hdrs_t));
+                return NULL;
+            }
         }
         result->ether_hdr = ether_hdr;
     }
