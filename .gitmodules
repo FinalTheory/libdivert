@@ -1,0 +1,3 @@
+[submodule "libnids"]
+	path = libnids
+	url = ssh://g@gitlab.baidu.com:8022/huangyan13/libnids.git

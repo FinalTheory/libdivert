@@ -13,8 +13,6 @@
 #define DIVERT_DUMP_ETHER_HERDER    (1u << 2)
 #define DIVERT_DUMP_IP_HEADER       (1u << 3)
 
-#define MAGIC_OFFSET 4u
-
 #define MIN_IP_HEADER_SIZE  20u
 #define MIN_TCP_HEADER_SIZE 20u
 

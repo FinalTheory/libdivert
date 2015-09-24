@@ -19,8 +19,7 @@
 #define FIREWALL_FAILURE    -3
 #define PCAP_BUFFER_FAILURE -4
 #define CALLBACK_NOT_FOUND  -5
-#define IO_BUFFER_FAILURE   -6
-#define PIPE_OPEN_FAILURE   -7
+#define PIPE_OPEN_FAILURE   -6
 
 /*
  * default packet parameters
@@ -33,6 +32,7 @@
 #define PACKET_INFO_CACHE_SIZE  10000
 #define MAX_EVENT_COUNT         16
 #define PIPE_BUFFER_SIZE        8
+#define NUM_TCP_STREAMS         2048
 
 /*
  * flags to control divert behaviour
@@ -43,6 +43,7 @@
 #define DIVERT_FLAG_WITH_PKTAP   (1u)
 #define DIVERT_FLAG_PRECISE_INFO (1u << 1)
 #define DIVERT_FLAG_BLOCK_IO     (1u << 2)
+#define DIVERT_FLAG_TCP_REASSEM  (1u << 3)
 
 /*
  * flags for packet buffer and error handling
@@ -168,6 +169,8 @@ ssize_t divert_read(divert_t *handle,
 int divert_is_inbound(struct sockaddr *sin_raw, char *interface);
 
 int divert_is_outbound(struct sockaddr *sin_raw);
+
+// TODO: 增加重新计算校验和
 
 ssize_t divert_reinject(divert_t *handle, struct ip *packet,
                         ssize_t length, struct sockaddr *sin);

@@ -2,6 +2,8 @@
 #include "divert_ipfw.h"
 #include "dump_packet.h"
 #include "assert.h"
+#include "nids.h"
+#include "checksum.h"
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -103,7 +105,7 @@ static int divert_init_pcap(divert_t *divert_handle, char *errmsg) {
     divert_handle->pcap_handle = pcap_handle;
 
     if (pcap_handle == NULL) {
-        sprintf(errmsg, "Couldn't open device %s: %s", dev, errmsg);
+        sprintf(errmsg, "Couldn't open device %s: %s", dev, strerror(errno));
         return PCAP_FAILURE;
     }
 
@@ -218,7 +220,16 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
     int status = 0;
 
     /*
+     * if we enable the TCP reassemble
+     * then should also set the DIVERT_FLAG_WITH_PKTAP flag
+     */
+    if (divert_handle->flags & DIVERT_FLAG_TCP_REASSEM) {
+        divert_handle->flags |= DIVERT_FLAG_WITH_PKTAP;
+    }
+
+    /*
      * first init pcap metadata
+     * if we need pktap header or TCP reassemble
      */
     if (divert_handle->flags & DIVERT_FLAG_WITH_PKTAP) {
         status = divert_init_pcap(divert_handle, errmsg);
@@ -249,6 +260,16 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
         pipe(divert_handle->exit_fd) != 0) {
         sprintf(errmsg, "Could not create pipe: %s", strerror(errno));
         return PIPE_OPEN_FAILURE;
+    }
+
+    /*
+     * if enable the TCP reassemble function
+     */
+    if (divert_handle->flags & DIVERT_FLAG_TCP_REASSEM) {
+        nids_params.pcap_desc = divert_handle->pcap_handle;
+        nids_params.n_tcp_streams = NUM_TCP_STREAMS;
+        nids_params.scan_num_ports = 0;
+        nids_init();
     }
 
     divert_handle->is_looping = 1;
@@ -452,6 +473,20 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
                             // first dump the headers of this packet
                             divert_dump_packet(data_p, &packet_hdrs, ~0u, errmsg);
                             if (packet_hdrs.size_ip) {
+                                if (divert_handle->flags & DIVERT_FLAG_TCP_REASSEM) {
+                                    // fill in the pcap header structure
+                                    struct pcap_pkthdr pkthdr;
+                                    pkthdr.ts.tv_sec = packet_hdrs.bhep_hdr->bh_tstamp.tv_sec;
+                                    pkthdr.ts.tv_usec = packet_hdrs.bhep_hdr->bh_tstamp.tv_usec;
+                                    pkthdr.caplen = ntohs(packet_hdrs.ip_hdr->ip_len);
+                                    pkthdr.len = packet_hdrs.bhep_hdr->bh_datalen
+                                                 - (u_int32_t)((u_char *)(packet_hdrs.ip_hdr)
+                                                               - (u_char *)(packet_hdrs.bhep_hdr));
+                                    pkthdr.comment[0] = 0;
+
+                                    // call the pcap handler of libnids
+                                    nids_pcap_handler(NULL, &pkthdr, (u_char *)packet_hdrs.ip_hdr);
+                                }
                                 size_t packet_size = BPF_WORDALIGN(packet_hdrs.bhep_hdr->bh_caplen +
                                                                    packet_hdrs.bhep_hdr->bh_hdrlen);
                                 // note that pth_length is header length

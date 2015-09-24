@@ -2,6 +2,7 @@
 #define DIVERT_PACKET_INFO_H
 
 #include <sys/types.h>
+#include "net/bpf.h"
 #include "net/pktap.h"
 #include <pthread.h>
 
