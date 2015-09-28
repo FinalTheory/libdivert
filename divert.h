@@ -195,4 +195,6 @@ int divert_close(divert_t *divert_handle, char *errmsg);
 int divert_set_signal_handler(int signum,
                               divert_signal_t handler, void *data);
 
+void divert_signal_handler_stop_loop(int signal, void *handle);
+
 #endif //LIBDIVERT_DIVERT_H

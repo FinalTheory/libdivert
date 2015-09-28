@@ -1,23 +1,10 @@
 #include "divert.h"
-#include "dump_packet.h"
 #include "string.h"
 #include "nids.h"
 #include <unistd.h>
 #include <stdlib.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <arpa/inet.h>
-#include <string.h>
-#include <stdio.h>
 
-divert_t *handle;
-
-void intHandler(int signal, void *handle) {
-    puts("Loop stop by SIGINT.");
-    divert_loop_stop((divert_t *)handle);
-}
 
 void error_handler(u_int64_t flags) {
     if (flags & DIVERT_ERROR_BPF_INVALID) {
@@ -143,7 +130,7 @@ int main() {
     }
 
     // register signal handler to exit process gracefully
-    divert_set_signal_handler(SIGINT, intHandler, (void *)handle);
+    divert_set_signal_handler(SIGINT, divert_signal_handler_stop_loop, (void *)handle);
 
     printf("BPF buffer size: %zu\n", handle->bufsize);
 

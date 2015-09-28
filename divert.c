@@ -11,7 +11,6 @@
 #include <sys/event.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
-#include <util.h>
 
 
 /*
@@ -903,8 +902,13 @@ int divert_is_looping(divert_t *handle) {
 
 void divert_loop_stop(divert_t *handle) {
     char pipe_buf[] = "exit";
+    char errmsg[PCAP_ERRBUF_SIZE];
+    // set loop flag to zero
     handle->is_looping = 0;
+    // write data into pipe to exit event loop
     write(handle->pipe_fd[1], pipe_buf, sizeof(pipe_buf));
+    // clean firewall rule
+    ipfw_flush(errmsg);
 }
 
 int divert_bpf_stats(divert_t *handle, struct pcap_stat *stats) {
@@ -918,14 +922,10 @@ int divert_bpf_stats(divert_t *handle, struct pcap_stat *stats) {
 int divert_close(divert_t *divert_handle, char *errmsg) {
     errmsg[0] = 0;
 
+    // guard here to wait until event loop is stopped
     char str_buf[PIPE_BUFFER_SIZE];
     read(divert_handle->exit_fd[0], str_buf, sizeof(str_buf));
     assert(str_buf[0] == 's');
-
-    // delete ipfw firewall rule
-    if (ipfw_flush(errmsg) != 0) {
-        return FIREWALL_FAILURE;
-    }
 
     // close the divert socket and free the buffer
     close(divert_handle->divert_fd);
@@ -958,7 +958,7 @@ int divert_close(divert_t *divert_handle, char *errmsg) {
 static divert_signal_t divert_signal_func[MAX_SIGNAL_NUM] = {NULL,};
 
 // array to hold signal handler data
-static void *divert_signal_data[MAX_SIGNAL_NUM] = {NULL, };
+static void *divert_signal_data[MAX_SIGNAL_NUM] = {NULL,};
 
 static u_char divert_signal_flag[MAX_SIGNAL_NUM] = {0,};
 
@@ -989,4 +989,9 @@ int divert_set_signal_handler(int signum,
     } else {
         return -1;
     }
+}
+
+void divert_signal_handler_stop_loop(int signal,
+                                     void *handle) {
+    divert_loop_stop((divert_t *)handle);
 }

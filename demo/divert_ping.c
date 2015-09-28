@@ -6,11 +6,6 @@
 
 useconds_t delay = 400;
 
-void intHandler(int signal, void *handle) {
-    puts("Loop stop by SIGINT.");
-    divert_loop_stop((divert_t *)handle);
-}
-
 void error_handler(u_int64_t flags) {
     if (flags & DIVERT_ERROR_BPF_INVALID) {
         puts("Invalid BPF packet.");
@@ -117,7 +112,7 @@ int main(int argc, char *argv[]) {
     pthread_create(&reinject_thread, NULL, reinject_packets, handle);
 
     // register signal handler to exit process gracefully
-    divert_set_signal_handler(SIGINT, intHandler, (void *)handle);
+    divert_set_signal_handler(SIGINT, divert_signal_handler_stop_loop, (void *)handle);
 
     printf("Divert socket buffer size: %zu\n", handle->bufsize);
     puts("Note that ICMP packets to localhost are diverted twice, so the delay time would be double.\n");

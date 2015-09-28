@@ -4,11 +4,6 @@
 #include <stdlib.h>
 
 
-void intHandler(int signal, void *handle) {
-    puts("Loop stop by SIGINT.");
-    divert_loop_stop((divert_t *)handle);
-}
-
 void error_handler(u_int64_t flags) {
     if (flags & DIVERT_ERROR_BPF_INVALID) {
         puts("Invalid BPF packet.");
@@ -65,7 +60,7 @@ int main() {
     }
 
     // register signal handler to exit process gracefully
-    divert_set_signal_handler(SIGINT, intHandler, (void *)handle);
+    divert_set_signal_handler(SIGINT, divert_signal_handler_stop_loop, (void *)handle);
 
     printf("BPF buffer size: %zu\n", handle->bufsize);
 
