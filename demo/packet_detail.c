@@ -4,11 +4,9 @@
 #include <stdlib.h>
 
 
-divert_t *handle;
-
-void intHandler(int signal) {
+void intHandler(int signal, void *handle) {
     puts("Loop stop by SIGINT.");
-    divert_loop_stop(handle);
+    divert_loop_stop((divert_t *)handle);
 }
 
 void error_handler(u_int64_t flags) {
@@ -27,6 +25,7 @@ void error_handler(u_int64_t flags) {
 }
 
 void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, struct sockaddr *sin) {
+    divert_t *handle = (divert_t *)args;
     char errmsg[256];
     packet_hdrs_t packet_hdrs;
 
@@ -50,7 +49,7 @@ int main() {
     // buffer for error information
     char errmsg[PCAP_ERRBUF_SIZE];
     // create a handle for divert object
-    handle = divert_create(0, DIVERT_FLAG_WITH_PKTAP, errmsg);
+    divert_t *handle = divert_create(0, DIVERT_FLAG_WITH_PKTAP, errmsg);
 
     // set the callback function to handle packets
     divert_set_callback(handle, callback, handle);
@@ -66,7 +65,7 @@ int main() {
     }
 
     // register signal handler to exit process gracefully
-    signal(SIGINT, intHandler);
+    divert_set_signal_handler(SIGINT, intHandler, (void *)handle);
 
     printf("BPF buffer size: %zu\n", handle->bufsize);
 

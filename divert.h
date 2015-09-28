@@ -58,10 +58,15 @@
 #define DIVERT_STOP_LOOP            (1u << 5)
 #define DIVERT_ERROR_KQUEUE         (1u << 6)
 
+// typedef for divert callback function
 typedef void (*divert_callback_t)(void *args, struct pktap_header *pktap_hdr,
                                   struct ip *ip_data, struct sockaddr *sin);
 
+// typedef for divert error handler function
 typedef void (*divert_error_handler_t)(u_int64_t errflags);
+
+// typedef for divert signal handler
+typedef void (*divert_signal_t)(int sig, void *data);
 
 typedef struct {
     u_int32_t flags;
@@ -186,5 +191,8 @@ int divert_bpf_stats(divert_t *handle, struct pcap_stat *stats);
  * but *NOT* in the thread you call divert_loop_stop() !
  */
 int divert_close(divert_t *divert_handle, char *errmsg);
+
+int divert_set_signal_handler(int signum,
+                              divert_signal_t handler, void *data);
 
 #endif //LIBDIVERT_DIVERT_H

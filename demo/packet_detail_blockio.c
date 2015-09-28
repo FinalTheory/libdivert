@@ -9,12 +9,11 @@
 u_char packet_buf[MAX_PACKET_SIZE];
 u_char sin_buf[2 * sizeof(struct sockaddr)];
 u_char pktap_hdr_buf[2 * sizeof(struct pktap_header)];
-divert_t *handle;
 
 
-void intHandler(int signal) {
-    divert_loop_stop(handle);
+void intHandler(int signal, void *handle) {
     puts("Loop stop by SIGINT.");
+    divert_loop_stop((divert_t *)handle);
 }
 
 
@@ -44,7 +43,7 @@ int main() {
     packet_hdrs_t packet_hdrs;
 
     // create a handle for divert object
-    handle = divert_create(0, DIVERT_FLAG_WITH_PKTAP |
+    divert_t *handle = divert_create(0, DIVERT_FLAG_WITH_PKTAP |
                               DIVERT_FLAG_BLOCK_IO, errmsg);
 
     // set the error handler to display error information
@@ -58,7 +57,7 @@ int main() {
     }
 
     // register signal handler to exit process gracefully
-    signal(SIGINT, intHandler);
+    divert_set_signal_handler(SIGINT, intHandler, (void *)handle);
 
     printf("BPF buffer size: %zu\n", handle->bufsize);
 

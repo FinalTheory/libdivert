@@ -4,12 +4,11 @@
 #include <stdlib.h>
 
 
-divert_t *handle;
 useconds_t delay = 400;
 
-void intHandler(int signal) {
+void intHandler(int signal, void *handle) {
     puts("Loop stop by SIGINT.");
-    divert_loop_stop(handle);
+    divert_loop_stop((divert_t *)handle);
 }
 
 void error_handler(u_int64_t flags) {
@@ -35,6 +34,7 @@ typedef struct {
 } __tmp_data_type;
 
 void *reinject_packets(void *args) {
+    divert_t *handle = (divert_t *)args;
     int *count = malloc(sizeof(int));
     *count = 0;
 
@@ -55,6 +55,7 @@ void *reinject_packets(void *args) {
 }
 
 void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, struct sockaddr *sin) {
+    divert_t *handle = (divert_t *)args;
     socklen_t sin_len = sizeof(struct sockaddr);
     size_t ip_len = ntohs(packet->ip_len);
     char ifname[8];
@@ -92,7 +93,7 @@ int main(int argc, char *argv[]) {
 
     // create a handle for divert object
     // not using any flag, just divert all packets
-    handle = divert_create(0, 0u, errmsg);
+    divert_t *handle = divert_create(0, 0u, errmsg);
 
     // set the callback function to handle packets
     divert_set_callback(handle, callback, handle);
@@ -113,10 +114,10 @@ int main(int argc, char *argv[]) {
 
     // create a new thread to handle the ICMP packets
     pthread_t reinject_thread;
-    pthread_create(&reinject_thread, NULL, reinject_packets, NULL);
+    pthread_create(&reinject_thread, NULL, reinject_packets, handle);
 
     // register signal handler to exit process gracefully
-    signal(SIGINT, intHandler);
+    divert_set_signal_handler(SIGINT, intHandler, (void *)handle);
 
     printf("Divert socket buffer size: %zu\n", handle->bufsize);
     puts("Note that ICMP packets to localhost are diverted twice, so the delay time would be double.\n");

@@ -14,9 +14,9 @@
 
 divert_t *handle;
 
-void intHandler(int signal) {
+void intHandler(int signal, void *handle) {
     puts("Loop stop by SIGINT.");
-    divert_loop_stop(handle);
+    divert_loop_stop((divert_t *)handle);
 }
 
 void error_handler(u_int64_t flags) {
@@ -32,11 +32,6 @@ void error_handler(u_int64_t flags) {
     if (flags & DIVERT_ERROR_KQUEUE) {
         puts("kqueue error.");
     }
-}
-
-void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, struct sockaddr *sin) {
-    // re-inject packets into TCP/IP stack
-    divert_reinject(handle, packet, -1, sin);
 }
 
 #define int_ntoa(x)    inet_ntoa(*((struct in_addr *)&x))
@@ -148,7 +143,7 @@ int main() {
     }
 
     // register signal handler to exit process gracefully
-    signal(SIGINT, intHandler);
+    divert_set_signal_handler(SIGINT, intHandler, (void *)handle);
 
     printf("BPF buffer size: %zu\n", handle->bufsize);
 
@@ -162,7 +157,8 @@ int main() {
         divert_read(handle, pktap_hdr_buf,
                     packet_buf, sin_buf);
         // re-inject packets into TCP/IP stack
-        divert_reinject(handle, (struct ip *)packet_buf, -1, (struct sockaddr *)sin_buf);
+        divert_reinject(handle, (struct ip *)packet_buf,
+                        -1, (struct sockaddr *)sin_buf);
     }
 
     // output statics information

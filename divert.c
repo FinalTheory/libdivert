@@ -3,7 +3,6 @@
 #include "dump_packet.h"
 #include "assert.h"
 #include "nids.h"
-#include "checksum.h"
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -12,6 +11,7 @@
 #include <sys/event.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
+#include <util.h>
 
 
 /*
@@ -949,4 +949,44 @@ int divert_close(divert_t *divert_handle, char *errmsg) {
     memset(divert_handle, 0, sizeof(divert_t));
 
     return 0;
+}
+
+#define MAX_SIGNAL_NUM 128
+
+
+// array to hold signal handler functions
+static divert_signal_t divert_signal_func[MAX_SIGNAL_NUM] = {NULL,};
+
+// array to hold signal handler data
+static void *divert_signal_data[MAX_SIGNAL_NUM] = {NULL, };
+
+static u_char divert_signal_flag[MAX_SIGNAL_NUM] = {0,};
+
+
+void divert_signal_handler(int signum) {
+    // if the signal handler is registered
+    if (divert_signal_func[signum] != NULL) {
+        // then just call the handler funcion with stored data
+        divert_signal_func[signum](signum,
+                                   divert_signal_data[signum]);
+    }
+}
+
+int divert_set_signal_handler(int signum,
+                              divert_signal_t handler, void *data) {
+    if (0 <= signum && signum < MAX_SIGNAL_NUM) {
+        divert_signal_func[signum] = handler;
+        divert_signal_data[signum] = data;
+        if (!divert_signal_flag[signum]) {
+            // if it is first time to set signal function
+            sig_t ret_val = signal(signum, divert_signal_handler);
+            if (ret_val == SIG_ERR) {
+                return -1;
+            }
+            divert_signal_flag[signum] = 1;
+        }
+        return 0;
+    } else {
+        return -1;
+    }
 }
