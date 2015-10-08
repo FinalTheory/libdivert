@@ -49,7 +49,7 @@ void *reinject_packets(void *args) {
     return count;
 }
 
-void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, struct sockaddr *sin) {
+void callback(void *args, void *no_use, struct ip *packet, struct sockaddr *sin) {
     divert_t *handle = (divert_t *)args;
     socklen_t sin_len = sizeof(struct sockaddr);
     size_t ip_len = ntohs(packet->ip_len);

@@ -9,6 +9,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -fPIC")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall --std=c++11 -fPIC")
 
 add_definitions(
+        -DWITH_NIDS
         -DPRIVATE
         -D_IP_VHL
         -DHAVE_STRLCPY
@@ -16,6 +17,7 @@ add_definitions(
         -DHAVE_VSNPRINTF
 )
 
+link_directories(/usr/local/lib)
 include_directories(SYSTEM ./libnids ./include ./)
 
 set(LIB_SOURCE_FILES

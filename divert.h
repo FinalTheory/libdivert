@@ -1,7 +1,6 @@
 #ifndef LIBDIVERT_DIVERT_H
 #define LIBDIVERT_DIVERT_H
 
-#include "queue.h"
 #include "buffer.h"
 #include "net/bpf.h"
 #include "net/pktap.h"
@@ -40,8 +39,8 @@
  * or just divert the raw IP packets
  */
 
-#define DIVERT_FLAG_WITH_PKTAP   (1u)
-#define DIVERT_FLAG_PRECISE_INFO (1u << 1)
+#define DIVERT_FLAG_USE_PKTAP    (1u)
+#define DIVERT_FLAG_AUTO_FREE    (1u << 1)
 #define DIVERT_FLAG_BLOCK_IO     (1u << 2)
 #define DIVERT_FLAG_TCP_REASSEM  (1u << 3)
 
@@ -59,7 +58,7 @@
 #define DIVERT_ERROR_KQUEUE         (1u << 6)
 
 // typedef for divert callback function
-typedef void (*divert_callback_t)(void *args, struct pktap_header *pktap_hdr,
+typedef void (*divert_callback_t)(void *args, void *pktap_hdr,
                                   struct ip *ip_data, struct sockaddr *sin);
 
 // typedef for divert error handler function
@@ -91,7 +90,6 @@ typedef struct {
      * pcap handler
      */
     pcap_t *pcap_handle;            // handle for pcap structure
-    queue_t *bpf_queue;             // handle for queue structure
     packet_buf_t *thread_buffer;    // buffer for labeled packet
     size_t thread_buffer_size;      // buffer size of labeled packet
 
@@ -113,7 +111,6 @@ typedef struct {
     /*
      * other information
      */
-
     divert_error_handler_t err_handler;
     divert_callback_t callback;
     void *callback_args;
@@ -134,6 +131,14 @@ typedef struct {
     size_t size_udp;
     size_t size_payload;
 } packet_hdrs_t;
+
+#define MAX_COMM_LEN 32
+
+typedef struct {
+    pid_t pid;
+    pid_t epid;
+    char comm[MAX_COMM_LEN];
+} proc_info_t;
 
 typedef struct {
     u_int64_t time_stamp;
@@ -174,8 +179,6 @@ ssize_t divert_read(divert_t *handle,
 int divert_is_inbound(struct sockaddr *sin_raw, char *interface);
 
 int divert_is_outbound(struct sockaddr *sin_raw);
-
-// TODO: 增加重新计算校验和
 
 ssize_t divert_reinject(divert_t *handle, struct ip *packet,
                         ssize_t length, struct sockaddr *sin);

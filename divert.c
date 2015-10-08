@@ -86,7 +86,6 @@ int divert_set_pcap_filter(divert_t *divert_handle, char *pcap_filter, char *err
 int divert_set_filter(divert_t *handle, char *divert_filter, char *errmsg) {
     // do not use the packet queue
     // because the size may grow and not cleaned in time
-    handle->flags &= (~DIVERT_FLAG_PRECISE_INFO);
     if (ipfw_delete(DEFAULT_IPFW_RULE_ID, errmsg) != 0) {
         return -1;
     }
@@ -140,14 +139,15 @@ static int divert_init_pcap(divert_t *divert_handle, char *errmsg) {
         return PCAP_FAILURE;
     }
 
-    //divert_set_pcap_filter(divert_handle, "", errmsg);
+    if (divert_set_pcap_filter(divert_handle, "", errmsg) != 0) {
+        return PCAP_FAILURE;
+    }
 
     /* read the information of pcap handler */
     divert_handle->bpf_fd = pcap_handle->fd;
     divert_handle->bpf_buffer = pcap_handle->buffer;
     divert_handle->bufsize = (size_t)pcap_handle->bufsize;
-    // create queue for bpf packets
-    divert_handle->bpf_queue = queue_create();
+    // create buffer for divert packets
     divert_handle->packet_map = packet_map_create();
 
     return 0;
@@ -155,7 +155,7 @@ static int divert_init_pcap(divert_t *divert_handle, char *errmsg) {
 
 static int divert_init_divert_socket(divert_t *divert_handle, char *errmsg) {
 
-    divert_handle->divert_fd = socket(AF_INET, SOCK_RAW, IPPROTO_DIVERT);
+    divert_handle->divert_fd = socket(PF_INET, SOCK_RAW, IPPROTO_DIVERT);
     if (divert_handle->divert_fd == -1) {
         sprintf(errmsg, "Couldn't open a divert socket");
         return DIVERT_FAILURE;
@@ -219,18 +219,10 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
     int status = 0;
 
     /*
-     * if we enable the TCP reassemble
-     * then should also set the DIVERT_FLAG_WITH_PKTAP flag
-     */
-    if (divert_handle->flags & DIVERT_FLAG_TCP_REASSEM) {
-        divert_handle->flags |= DIVERT_FLAG_WITH_PKTAP;
-    }
-
-    /*
      * first init pcap metadata
      * if we need pktap header or TCP reassemble
      */
-    if (divert_handle->flags & DIVERT_FLAG_WITH_PKTAP) {
+    if (divert_handle->flags & DIVERT_FLAG_USE_PKTAP) {
         status = divert_init_pcap(divert_handle, errmsg);
         if (status != 0) {
             return status;
@@ -262,52 +254,18 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
     }
 
     /*
-     * if enable the TCP reassemble function
+     * init for TCP reassemble
      */
-    if (divert_handle->flags & DIVERT_FLAG_TCP_REASSEM) {
+    nids_params.n_tcp_streams = NUM_TCP_STREAMS;
+    nids_params.scan_num_ports = 0;
+    if (divert_handle->flags & DIVERT_FLAG_USE_PKTAP) {
         nids_params.pcap_desc = divert_handle->pcap_handle;
-        nids_params.n_tcp_streams = NUM_TCP_STREAMS;
-        nids_params.scan_num_ports = 0;
-        nids_init();
     }
+    nids_init();
 
     divert_handle->is_looping = 1;
 
     return 0;
-}
-
-/*
- * compare two packet_info_t structure
- */
-static int compare_packet(void *p1, void *p2) {
-    // the entire packet should be equal
-    // IP header, TCP header and data payload
-    packet_info_t *pkt1 = (packet_info_t *)p1;
-    packet_info_t *pkt2 = (packet_info_t *)p2;
-    size_t len1 = ntohs(pkt1->ip_data->ip_len);
-    size_t len2 = ntohs(pkt2->ip_data->ip_len);
-    if (len1 == len2 &&
-        memcmp(pkt1->ip_data, pkt2->ip_data, len1) == 0) {
-        return 1;
-    }
-    return 0;
-}
-
-static int should_drop(void *data, void *args) {
-    packet_info_t *pkt_info = (packet_info_t *)data;
-    u_int64_t timeout = ((u_int64_t *)args)[0];
-    u_int64_t time_stamp = ((u_int64_t *)args)[1];
-    if (time_stamp - pkt_info->time_stamp > timeout) {
-        return 1;
-    } else {
-        return 0;
-    }
-}
-
-static void free_packet_data(void *ptr) {
-    packet_info_t *p = (packet_info_t *)ptr;
-    free(p->ip_data);
-    free(p);
 }
 
 static inline packet_info_t *divert_new_error_packet(u_int64_t flag) {
@@ -352,14 +310,10 @@ static void *divert_thread_callback(void *arg) {
         }
         // if the cache is too big, and this thread buffer is empty
         if (handle->thread_buffer->size == 0 &&
-            handle->flags & DIVERT_FLAG_WITH_PKTAP &&
+            handle->flags & (DIVERT_FLAG_USE_PKTAP | DIVERT_FLAG_AUTO_FREE) &&
             packet_map_get_size(handle->packet_map) > PACKET_INFO_CACHE_SIZE) {
             // then just free it
             packet_map_clean(handle->packet_map);
-#ifdef DEBUG
-            printf("Now clean buffer, current size: %zu\n",
-                   packet_map_get_size(handle->packet_map));
-#endif
         }
     }
     handle->is_looping = 0;
@@ -370,8 +324,7 @@ static u_char divert_extract_IP_port(packet_hdrs_t *packet_hdrs,
                                      in_addr_t *ip_src,
                                      in_addr_t *ip_dst,
                                      u_short *port_src,
-                                     u_short *port_dst) {
-    // TODO: modify here to support ICMP
+                                     u_short *port_dst, unsigned short *chksum) {
     u_char is_tcpudp = 0;
     *ip_src = packet_hdrs->ip_hdr->ip_src.s_addr;
     *ip_dst = packet_hdrs->ip_hdr->ip_dst.s_addr;
@@ -379,10 +332,12 @@ static u_char divert_extract_IP_port(packet_hdrs_t *packet_hdrs,
         is_tcpudp = 1;
         *port_src = packet_hdrs->tcp_hdr->th_sport;
         *port_dst = packet_hdrs->tcp_hdr->th_dport;
+        *chksum = packet_hdrs->tcp_hdr->th_sum;
     } else if (packet_hdrs->size_udp) {
         is_tcpudp = 1;
         *port_src = packet_hdrs->udp_hdr->uh_sport;
         *port_dst = packet_hdrs->udp_hdr->uh_dport;
+        *chksum = packet_hdrs->udp_hdr->uh_sum;
     }
     return is_tcpudp;
 }
@@ -390,21 +345,15 @@ static u_char divert_extract_IP_port(packet_hdrs_t *packet_hdrs,
 static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
     u_char found_info;
     in_addr_t ip_src, ip_dst;
-    u_short port_src, port_dst;
+    u_short port_src, port_dst, chksum;
     void *ret_val;
     pthread_t *divert_thread_callback_handle = calloc(1, sizeof(pthread_t));
     ssize_t num_divert, num_bpf;
-    queue_node_t *node;
-    void *time_info = malloc(2 * sizeof(u_int64_t));
     char errmsg[PCAP_ERRBUF_SIZE];
 
     socklen_t sin_len = sizeof(struct sockaddr);
 
     packet_hdrs_t packet_hdrs;
-    packet_info_t packet_info;
-
-    /* store the callback function and arguments into divert handle */
-    ((u_int64_t *)time_info)[0] = divert_handle->timeout;
 
     divert_handle->is_looping = 1;
     divert_handle->num_missed = 0;
@@ -488,28 +437,14 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
                                 }
                                 size_t packet_size = BPF_WORDALIGN(packet_hdrs.bhep_hdr->bh_caplen +
                                                                    packet_hdrs.bhep_hdr->bh_hdrlen);
-                                // note that pth_length is header length
-                                // and the length of ip packet should be converted
-                                size_t pktap_len = packet_hdrs.pktap_hdr->pth_length;
-                                size_t ip_length = ntohs(packet_hdrs.ip_hdr->ip_len);
-                                // copy data of pktap header
-                                struct pktap_header *pktap_hdr = malloc(pktap_len);
-                                memcpy(pktap_hdr, packet_hdrs.pktap_hdr, pktap_len);
-                                // and insert it into packet map
-                                if (divert_extract_IP_port(&packet_hdrs, &ip_src,
-                                                           &ip_dst, &port_src, &port_dst)) {
-                                    packet_map_insert(divert_handle->packet_map, ip_src, ip_dst,
-                                                      port_src, port_dst, pktap_hdr);
-                                }
-                                // if we want more accurate process information
-                                // then we should insert the packets into queue
-                                if (divert_handle->flags & DIVERT_FLAG_PRECISE_INFO) {
-                                    packet_info_t *new_packet = malloc(sizeof(packet_info_t));
-                                    new_packet->time_stamp = divert_handle->current_time_stamp;
-                                    new_packet->pktap_hdr = pktap_hdr;
-                                    new_packet->ip_data = malloc(ip_length);
-                                    memcpy(new_packet->ip_data, packet_hdrs.ip_hdr, ip_length);
-                                    queue_push(divert_handle->bpf_queue, new_packet);
+                                if (packet_hdrs.pktap_hdr->pth_pid != -1 ||
+                                    packet_hdrs.pktap_hdr->pth_epid != -1) {
+                                    // insert it into packet map
+                                    if (divert_extract_IP_port(&packet_hdrs, &ip_src,
+                                                               &ip_dst, &port_src, &port_dst, &chksum)) {
+                                        packet_map_insert(divert_handle->packet_map, ip_src, ip_dst,
+                                                          port_src, port_dst, chksum, packet_hdrs.pktap_hdr);
+                                    }
                                 }
                                 divert_handle->num_captured++;
                                 // update the data pointer
@@ -536,76 +471,28 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
                                           sin, &sin_len);
 
                     if (num_divert > 0) {
-                        // store time stamp into variable
-                        ((u_int64_t *)time_info)[1] = divert_handle->current_time_stamp;
                         // extract the headers of current packet
                         divert_dump_packet(divert_handle->divert_buffer,
                                            &packet_hdrs, DIVERT_DUMP_IP_HEADER, errmsg);
                         if (packet_hdrs.size_ip) {
                             found_info = 0;
-                            // if we want the information to be accurate, then
-                            // search in queue and find process info of this packet
-                            if (divert_handle->flags & DIVERT_FLAG_PRECISE_INFO) {
-                                // set the packet information
-                                // note that the divert socket receives a packet of IP protocol
-                                packet_info.time_stamp = divert_handle->current_time_stamp;
-                                packet_info.ip_data = packet_hdrs.ip_hdr;
-                                packet_info.sin = sin;
-                                packet_info.pktap_hdr = NULL;
-                                if ((node = queue_search_and_drop(divert_handle->bpf_queue,
-                                                                  &packet_info,
-                                                                  time_info,
-                                                                  compare_packet,
-                                                                  should_drop,
-                                                                  free_packet_data)) != NULL) {
-                                    found_info = 1;
-                                    // insert the packet into thread buffer
-                                    // and let another thread handle it
-                                    // in order to save time
-                                    packet_info_t *current_packet = (packet_info_t *)node->data;
-                                    // release the memory of this node
-                                    free(node);
-                                    current_packet->time_stamp = DIVERT_RAW_IP_PACKET;
-                                    current_packet->sin = sin;
-                                    divert_buf_insert(divert_handle->thread_buffer, current_packet);
-#ifdef DEBUG
-                                    // for debug
-                                    // see if this two way of finding pid would get different results
-                                    struct pktap_header *pktap_hdr;
-                                    if (divert_extract_IP_port(&packet_hdrs, &ip_src,
-                                                               &ip_dst, &port_src, &port_dst) &&
-                                        (pktap_hdr = packet_map_query(divert_handle->packet_map,
-                                                                      ip_src, ip_dst,
-                                                                      port_src, port_dst)) != NULL) {
-                                        if (pktap_hdr->pth_pid != current_packet->pktap_hdr->pth_pid) {
-                                            fprintf(stderr, "Error pid: %d: %s, real: %d: %s\n",
-                                                   pktap_hdr->pth_pid, pktap_hdr->pth_comm,
-                                                   current_packet->pktap_hdr->pth_pid,
-                                                   current_packet->pktap_hdr->pth_comm);
-                                        }
-                                    }
-#endif
-                                }
-                            }
-                            if (!found_info) {
-                                struct pktap_header *pktap_hdr;
-                                if (divert_extract_IP_port(&packet_hdrs, &ip_src,
-                                                           &ip_dst, &port_src, &port_dst) &&
-                                    (pktap_hdr = packet_map_query(divert_handle->packet_map,
-                                                                  ip_src, ip_dst,
-                                                                  port_src, port_dst)) != NULL) {
-                                    found_info = 1;
-                                    size_t ip_length = ntohs(packet_hdrs.ip_hdr->ip_len);
-                                    packet_info_t *new_packet = malloc(sizeof(packet_info_t));
-                                    new_packet->time_stamp = DIVERT_RAW_IP_PACKET;
-                                    new_packet->pktap_hdr = pktap_hdr;
-                                    new_packet->sin = sin;
-                                    // allocate memory
-                                    new_packet->ip_data = malloc(ip_length);
-                                    // and copy data
-                                    memcpy(new_packet->ip_data, packet_hdrs.ip_hdr, ip_length);
-                                    divert_buf_insert(divert_handle->thread_buffer, new_packet);
-                                }
+                            struct pktap_header *pktap_hdr;
+                            if (divert_extract_IP_port(&packet_hdrs, &ip_src,
+                                                       &ip_dst, &port_src, &port_dst, &chksum) &&
+                                (pktap_hdr = packet_map_query(divert_handle->packet_map,
+                                                              ip_src, ip_dst,
+                                                              port_src, port_dst, chksum)) != NULL) {
+                                found_info = 1;
+                                size_t ip_length = ntohs(packet_hdrs.ip_hdr->ip_len);
+                                packet_info_t *new_packet = malloc(sizeof(packet_info_t));
+                                new_packet->time_stamp = DIVERT_RAW_IP_PACKET;
+                                new_packet->pktap_hdr = pktap_hdr;
+                                new_packet->sin = sin;
+                                // allocate memory
+                                new_packet->ip_data = malloc(ip_length);
+                                // and copy data
+                                memcpy(new_packet->ip_data, packet_hdrs.ip_hdr, ip_length);
+                                divert_buf_insert(divert_handle->thread_buffer, new_packet);
                             }
                             if (!found_info) {
                                 // if packet is not found in the queue, then just send it to user
@@ -663,7 +550,7 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
     write(divert_handle->exit_fd[1], exit_str, sizeof(exit_str));
 }
 
-static void divert_loop_without_pktap(divert_t *divert_handle, int count) {
+static void divert_loop_with_kext(divert_t *divert_handle, int count) {
     // return value of thread
     void *ret_val;
     // number of diverted bytes
@@ -790,10 +677,10 @@ void *divert_non_block_thread(void *args) {
 
 void divert_loop(divert_t *divert_handle, int count) {
     divert_loop_func_t loop_function;
-    if (divert_handle->flags & DIVERT_FLAG_WITH_PKTAP) {
+    if (divert_handle->flags & DIVERT_FLAG_USE_PKTAP) {
         loop_function = divert_loop_with_pktap;
     } else {
-        loop_function = divert_loop_without_pktap;
+        loop_function = divert_loop_with_kext;
     }
 
     // if use block IO, then
@@ -877,7 +764,7 @@ ssize_t divert_read(divert_t *handle,
 
         // if the cache is too big, and this thread buffer is empty
         if (handle->thread_buffer->size == 0 &&
-            handle->flags & DIVERT_FLAG_WITH_PKTAP &&
+            handle->flags & (DIVERT_FLAG_USE_PKTAP | DIVERT_FLAG_AUTO_FREE) &&
             packet_map_get_size(handle->packet_map) > PACKET_INFO_CACHE_SIZE) {
             // then just free it
             packet_map_clean(handle->packet_map);
@@ -935,7 +822,7 @@ int divert_close(divert_t *divert_handle, char *errmsg) {
     }
 
     // close the pcap handler and clean the thread buffer
-    if (divert_handle->flags & DIVERT_FLAG_WITH_PKTAP) {
+    if (divert_handle->flags & DIVERT_FLAG_USE_PKTAP) {
         pcap_close(divert_handle->pcap_handle);
         packet_map_free(divert_handle->packet_map);
     }

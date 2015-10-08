@@ -19,7 +19,8 @@ void error_handler(u_int64_t flags) {
     }
 }
 
-void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, struct sockaddr *sin) {
+void callback(void *args, void *data, struct ip *packet, struct sockaddr *sin) {
+    struct pktap_header *pktap_hdr = (struct pktap_header *)data;
     divert_t *handle = (divert_t *)args;
     char errmsg[256];
     packet_hdrs_t packet_hdrs;
@@ -33,10 +34,12 @@ void callback(void *args, struct pktap_header *pktap_hdr, struct ip *packet, str
 
     // if the packet has process information
     if (pktap_hdr != NULL) {
-        printf("\nSend by %s: %d on device: %s\n", pktap_hdr->pth_comm,
-               pktap_hdr->pth_pid, pktap_hdr->pth_ifname);
+        printf("Send by %s: %d on device: %s, %s\n", pktap_hdr->pth_comm,
+               pktap_hdr->pth_pid, pktap_hdr->pth_ifname,
+               divert_is_outbound(sin) ? "out" : "in");
     } else {
-        divert_print_packet(stderr, ~0u, &packet_hdrs, pktap_hdr);
+        printf("Send by unknown process, %s\n",
+               divert_is_outbound(sin) ? "out" : "in");
     }
 }
 
@@ -44,7 +47,7 @@ int main() {
     // buffer for error information
     char errmsg[PCAP_ERRBUF_SIZE];
     // create a handle for divert object
-    divert_t *handle = divert_create(0, DIVERT_FLAG_WITH_PKTAP, errmsg);
+    divert_t *handle = divert_create(0, DIVERT_FLAG_USE_PKTAP, errmsg);
 
     // set the callback function to handle packets
     divert_set_callback(handle, callback, handle);

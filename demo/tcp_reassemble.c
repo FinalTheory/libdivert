@@ -115,7 +115,7 @@ int main() {
     char errmsg[PCAP_ERRBUF_SIZE];
 
     // create a handle for divert object
-    handle = divert_create(0, DIVERT_FLAG_WITH_PKTAP |
+    handle = divert_create(0, DIVERT_FLAG_USE_PKTAP |
                               DIVERT_FLAG_BLOCK_IO |
                               DIVERT_FLAG_TCP_REASSEM, errmsg);
 

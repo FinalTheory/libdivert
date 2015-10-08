@@ -37,7 +37,7 @@ int main() {
     packet_hdrs_t packet_hdrs;
 
     // create a handle for divert object
-    divert_t *handle = divert_create(0, DIVERT_FLAG_WITH_PKTAP |
+    divert_t *handle = divert_create(0, DIVERT_FLAG_USE_PKTAP |
                               DIVERT_FLAG_BLOCK_IO, errmsg);
 
     // set the error handler to display error information
