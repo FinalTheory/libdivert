@@ -16,3 +16,6 @@ target_link_libraries(delay_ping divert)
 
 add_executable(tcp_reassemble tcp_reassemble.c)
 target_link_libraries(tcp_reassemble divert)
+
+add_executable(dump_divert dump_divert.c)
+target_link_libraries(dump_divert divert)

@@ -48,7 +48,7 @@
 
 inline static int valid_ip_header(u_char *data) {
     struct ip *ip_hdr = (struct ip *)data;
-    return (IP_VHL_HL(ip_hdr->ip_vhl) * 4u >= MIN_IP_HEADER_SIZE);
+    return (ip_hdr->ip_hl * 4u >= MIN_IP_HEADER_SIZE);
 }
 
 inline static ssize_t get_offset_by_dlt(int dlt) {
@@ -120,7 +120,7 @@ u_char *divert_dump_packet(u_char *packet, packet_hdrs_t *result,
 
     if (flags & DIVERT_DUMP_IP_HEADER) {
         struct ip *ip_hdr = (struct ip *)entry;          /* define/compute ip header offset */
-        size_t size_ip = IP_VHL_HL(ip_hdr->ip_vhl) * 4u; /* size of IP header */
+        size_t size_ip = ip_hdr->ip_hl * 4u; /* size of IP header */
 
         struct tcphdr *tcp_hdr = NULL;                   /* The TCP header */
         struct udphdr *udp_hdr = NULL;                   /* The packet payload */

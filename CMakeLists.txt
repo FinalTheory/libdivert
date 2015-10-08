@@ -11,7 +11,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall --std=c++11 -fPIC")
 add_definitions(
         -DWITH_NIDS
         -DPRIVATE
-        -D_IP_VHL
         -DHAVE_STRLCPY
         -DHAVE_SNPRINTF
         -DHAVE_VSNPRINTF

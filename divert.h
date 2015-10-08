@@ -19,6 +19,7 @@
 #define PCAP_BUFFER_FAILURE -4
 #define CALLBACK_NOT_FOUND  -5
 #define PIPE_OPEN_FAILURE   -6
+#define FILE_IO_ERROR       -7
 
 /*
  * default packet parameters
@@ -75,6 +76,7 @@ typedef struct {
      */
     int bpf_fd;                     // file descriptor of BPF device
     int divert_fd;                  // file descriptor of divert socket
+    int kext_fd;                    // file descriptor for kernel-to-userland communication
     int divert_port;                // port bind to divert socket
     int pipe_fd[2];                 // use pipe descriptor to end event loop gracefully
     int exit_fd[2];                 // use pipe descriptor to wait event loop gracefully
@@ -175,6 +177,15 @@ ssize_t divert_read(divert_t *handle,
                     u_char *pktap_hdr,
                     u_char *ip_data,
                     u_char *sin);
+
+int divert_query_proc_by_packet(divert_t *handle,
+                                struct ip *ip_hdr,
+                                struct sockaddr *sin,
+                                proc_info_t *result);
+
+int divert_init_pcap(FILE *fp, char *errmsg);
+
+int divert_dump_pcap(struct ip *packet, FILE *fp, char *errmsg);
 
 int divert_is_inbound(struct sockaddr *sin_raw, char *interface);
 

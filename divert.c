@@ -1,17 +1,22 @@
-#include "divert.h"
-#include "divert_ipfw.h"
-#include "dump_packet.h"
-#include "assert.h"
-#include "nids.h"
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <sys/ioctl.h>
 #include <sys/event.h>
-#include <netinet/tcp.h>
+#include <sys/sys_domain.h>
+#include <sys/kern_control.h>
+#include <net/ethernet.h>
+#include <netinet/ip.h>
 #include <netinet/udp.h>
-
+#include <libproc.h>
+#include "divert.h"
+#include "divert_ipfw.h"
+#include "dump_packet.h"
+#include "assert.h"
+#include "nids.h"
+#include "KernFunc.h"
 
 /*
  * only constant and parameter variables could be assigned here
@@ -92,7 +97,7 @@ int divert_set_filter(divert_t *handle, char *divert_filter, char *errmsg) {
     return ipfw_setup(divert_filter, (u_short)handle->divert_port, errmsg);
 }
 
-static int divert_init_pcap(divert_t *divert_handle, char *errmsg) {
+static int divert_init_pcap_handle(divert_t *divert_handle, char *errmsg) {
 
     pcap_t *pcap_handle;
     char *dev = PKTAP_IFNAME ",all";
@@ -213,6 +218,151 @@ static int divert_init_divert_socket(divert_t *divert_handle, char *errmsg) {
     return 0;
 }
 
+static int divert_init_kernel_ctl_iface(int *fd, char *errmsg) {
+    // open socket for pid query
+    int kext_fd = socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
+    if (kext_fd < 0) {
+        sprintf(errmsg, "Could not open kext socket: %s", strerror(errno));
+        return DIVERT_FAILURE;
+    }
+
+    struct ctl_info info;
+    memset(&info, 0, sizeof(info));
+    strncpy(info.ctl_name, KEXT_CTL_NAME, sizeof(info.ctl_name));
+    if (ioctl(kext_fd, CTLIOCGINFO, &info) != 0) {
+        sprintf(errmsg, "Could not get ID for kernel control: %s", strerror(errno));
+        return DIVERT_FAILURE;
+    }
+
+    struct sockaddr_ctl addr;
+    bzero(&addr, sizeof(addr));
+    addr.sc_len = sizeof(addr);
+    addr.sc_family = AF_SYSTEM;
+    addr.ss_sysaddr = AF_SYS_CONTROL;
+    addr.sc_id = info.ctl_id;
+    addr.sc_unit = 0;
+
+    int ret_val = connect(kext_fd, (struct sockaddr *)&addr, sizeof(addr));
+    if (ret_val != 0) {
+        sprintf(errmsg, "Could not connect to kernel control: %s", strerror(errno));
+        return DIVERT_FAILURE;
+    }
+
+    *fd = kext_fd;
+    return 0;
+}
+
+int divert_query_proc_by_packet(divert_t *handle,
+                                struct ip *ip_hdr,
+                                struct sockaddr *sin,
+                                proc_info_t *result) {
+    u_short sport = 0, dport = 0;
+    size_t ip_len = (ip_hdr->ip_hl) << 2;
+    u_char *payload = (u_char *)ip_hdr + ip_len;
+    if (ip_hdr->ip_p == IPPROTO_TCP) {
+        struct tcphdr *tcp_hdr = (struct tcphdr *)payload;
+        sport = tcp_hdr->th_sport;
+        dport = tcp_hdr->th_dport;
+    } else if (ip_hdr->ip_p == IPPROTO_UDP) {
+        struct udphdr *udp_hdr = (struct udphdr *)payload;
+        sport = udp_hdr->uh_sport;
+        dport = udp_hdr->uh_dport;
+    } else {
+        goto fail;
+    }
+
+    struct qry_data input_data;
+    socklen_t len = sizeof(input_data);
+    memset(&input_data, 0, sizeof(input_data));
+    strncpy(input_data.iface,
+            ((struct sockaddr_in *)sin)->sin_zero,
+            sizeof(input_data.iface));
+    input_data.saddr = ip_hdr->ip_src.s_addr;
+    input_data.daddr = ip_hdr->ip_dst.s_addr;
+    input_data.proto = ip_hdr->ip_p;
+    input_data.source = sport;
+    input_data.dest = dport;
+
+    int ctl_flag = 0;
+    if (divert_is_outbound(sin)) {
+        ctl_flag = KERN_CTL_OUTBOUND;
+    } else if (divert_is_inbound(sin, NULL)) {
+        ctl_flag = KERN_CTL_INBOUND;
+    } else {
+        goto fail;
+    }
+
+    if (getsockopt(handle->kext_fd, SYSPROTO_CONTROL,
+                   ctl_flag, &input_data, &len) != 0) {
+        goto fail;
+    }
+
+    result->pid = input_data.pid;
+    result->epid = input_data.epid;
+    pid_t pid = result->pid == -1 ? result->epid : result->pid;
+    if (pid != -1) {
+        proc_name(pid, result->comm, sizeof(result->comm));
+    } else {
+        goto fail;
+    }
+    return 1;
+
+    fail:
+    result->pid = -1;
+    result->epid = -1;
+    result->comm[0] = 0;
+    return 0;
+}
+
+#define TCPDUMP_MAGIC        0xa1b2c3d4
+
+int divert_init_pcap(FILE *fp, char *errmsg) {
+    struct pcap_file_header hdr;
+    hdr.magic = TCPDUMP_MAGIC;
+    hdr.version_major = PCAP_VERSION_MAJOR;
+    hdr.version_minor = PCAP_VERSION_MINOR;
+    hdr.thiszone = 0;
+    hdr.snaplen = 65545;
+    hdr.sigfigs = 0;
+    hdr.linktype = DLT_EN10MB;
+    if (fwrite((char *)&hdr, sizeof(hdr), 1, fp) != 1) {
+        sprintf(errmsg, "Could not create pcap header: %s", strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
+int divert_dump_pcap(struct ip *packet, FILE *fp, char *errmsg) {
+    struct pcap_sf_pkthdr sf_hdr;
+    struct timeval tv;
+    struct timezone tz;
+    gettimeofday(&tv, &tz);
+    sf_hdr.ts.tv_sec = (bpf_int32)tv.tv_sec;
+    sf_hdr.ts.tv_usec = (bpf_int32)tv.tv_usec;
+    size_t ip_len = ntohs(packet->ip_len);
+    sf_hdr.caplen = sf_hdr.len = (bpf_int32)(ip_len + ETHER_HDR_LEN);
+    struct ether_header ether_hdr;
+    memset(&ether_hdr, 0, sizeof(ether_hdr));
+    ether_hdr.ether_type = htons(ETHERTYPE_IP);
+    size_t ret_val;
+    ret_val = fwrite(&sf_hdr, 1, sizeof(sf_hdr), fp);
+    if (ret_val != sizeof(sf_hdr)) {
+        sprintf(errmsg, "Error on fwrite: %s", strerror(errno));
+        return -1;
+    }
+    ret_val = fwrite(&ether_hdr, 1, sizeof(ether_hdr), fp);
+    if (ret_val != sizeof(ether_hdr)) {
+        sprintf(errmsg, "Error on fwrite: %s", strerror(errno));
+        return -1;
+    }
+    ret_val = fwrite(packet, 1, ip_len, fp);
+    if (ret_val != ip_len) {
+        sprintf(errmsg, "Error on fwrite: %s", strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
 int divert_activate(divert_t *divert_handle, char *errmsg) {
     // clean error message
     errmsg[0] = 0;
@@ -223,9 +373,15 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
      * if we need pktap header or TCP reassemble
      */
     if (divert_handle->flags & DIVERT_FLAG_USE_PKTAP) {
-        status = divert_init_pcap(divert_handle, errmsg);
+        status = divert_init_pcap_handle(divert_handle, errmsg);
         if (status != 0) {
             return status;
+        }
+    } else {
+        // if not use PKTAP, then check if KEXT is loaded
+        // and setup query file descriptor
+        if (divert_init_kernel_ctl_iface(&divert_handle->kext_fd, errmsg) != 0) {
+            return DIVERT_FAILURE;
         }
     }
 
@@ -277,6 +433,7 @@ static inline packet_info_t *divert_new_error_packet(u_int64_t flag) {
 }
 
 static void *divert_thread_callback(void *arg) {
+    proc_info_t proc_info;
     packet_info_t *packet;
     divert_t *handle = (divert_t *)arg;
     packet_buf_t *buf = handle->thread_buffer;
@@ -289,8 +446,15 @@ static void *divert_thread_callback(void *arg) {
             (DIVERT_RAW_BPF_PACKET |
              DIVERT_RAW_IP_PACKET)) {
             // call the callback function
-            callback(callback_args, packet->pktap_hdr,
-                     packet->ip_data, packet->sin);
+            if (handle->flags & DIVERT_FLAG_USE_PKTAP) {
+                callback(callback_args, packet->pktap_hdr,
+                         packet->ip_data, packet->sin);
+            } else {
+                divert_query_proc_by_packet(handle, packet->ip_data,
+                                            packet->sin, &proc_info);
+                callback(callback_args, &proc_info,
+                         packet->ip_data, packet->sin);
+            }
             free(packet->ip_data);
             free(packet->sin);
             free(packet);
@@ -566,7 +730,7 @@ static void divert_loop_with_kext(divert_t *divert_handle, int count) {
      * and arguments into divert handle
      */
     divert_handle->is_looping = 1;
-    divert_handle->num_missed = 0;
+    divert_handle->num_diverted = 0;
     // only start new thread in non-blocking mode
     if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
         pthread_create(divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
@@ -623,7 +787,7 @@ static void divert_loop_with_kext(divert_t *divert_handle, int count) {
                             // and copy data
                             memcpy(new_packet->ip_data, packet_hdrs.ip_hdr, ip_length);
                             divert_buf_insert(divert_handle->thread_buffer, new_packet);
-                            divert_handle->num_missed++;
+                            divert_handle->num_diverted++;
                         }
                     } else {
                         // no valid data, so insert a flag into thread buffer
@@ -631,7 +795,7 @@ static void divert_loop_with_kext(divert_t *divert_handle, int count) {
                                           divert_new_error_packet(DIVERT_ERROR_DIVERT_NODATA));
                         free(sin);
                     }
-                    if (count > 0 && divert_handle->num_missed > count) {
+                    if (count > 0 && divert_handle->num_diverted > count) {
                         goto finish;
                     }
                 } else if (fd == divert_handle->pipe_fd[0]) {
@@ -735,12 +899,17 @@ ssize_t divert_read(divert_t *handle,
             memcpy(ip_data, packet->ip_data,
                    ntohs(packet->ip_data->ip_len));
             memcpy(sin, packet->sin, sizeof(struct sockaddr));
-            // if pktap header is not NULL, copy it
-            if (packet->pktap_hdr != NULL) {
-                memcpy(pktap_hdr, packet->pktap_hdr,
-                       packet->pktap_hdr->pth_length);
+            if (handle->flags & DIVERT_FLAG_USE_PKTAP) {
+                // if pktap header is not NULL, copy it
+                if (packet->pktap_hdr != NULL) {
+                    memcpy(pktap_hdr, packet->pktap_hdr,
+                           packet->pktap_hdr->pth_length);
+                } else {
+                    memset(pktap_hdr, 0, sizeof(struct pktap_header));
+                }
             } else {
-                memset(pktap_hdr, 0, sizeof(struct pktap_header));
+                divert_query_proc_by_packet(handle, packet->ip_data,
+                                            packet->sin, (proc_info_t *)pktap_hdr);
             }
             // free the allocated memory
             free(packet->ip_data);

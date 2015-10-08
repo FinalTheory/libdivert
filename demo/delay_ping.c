@@ -124,7 +124,7 @@ int main(int argc, char *argv[]) {
     divert_buf_insert(thread_buffer, NULL);
 
     // output statics information
-    printf("Diverted packets: %llu\n", handle->num_missed);
+    printf("Diverted packets: %llu\n", handle->num_diverted);
     pthread_join(reinject_thread, &ret);
     printf("Diverted %d ICMP packets.\n", *(int *)ret);
 
