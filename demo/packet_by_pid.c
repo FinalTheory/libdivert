@@ -2,13 +2,14 @@
 #include "dump_packet.h"
 #include "print_packet.h"
 #include <stdlib.h>
+#include <libproc.h>
 
 #define MAX_PACKET_SIZE 65535
 
 
 u_char packet_buf[MAX_PACKET_SIZE];
 u_char sin_buf[2 * sizeof(struct sockaddr)];
-u_char pktap_hdr_buf[2 * sizeof(struct pktap_header)];
+u_char proc_info_buf[2 * sizeof(proc_info_t)];
 
 
 void error_handler(u_int64_t flags) {
@@ -27,18 +28,29 @@ void error_handler(u_int64_t flags) {
 }
 
 
-int main() {
+static pid_t pid;
+static char proc_name_buf[128];
+
+
+int main(int argc, char *argv[]) {
+    if (argc == 2) {
+        pid = atoi(argv[1]);
+    } else {
+        puts("Usage: ./packet_by_pid <PID>");
+        exit(EXIT_FAILURE);
+    }
+    proc_name(pid, proc_name_buf, sizeof(proc_name_buf));
+    printf("Watching packets of %s: %d\n", proc_name_buf, pid);
+
     // buffer for error information
     char errmsg[PCAP_ERRBUF_SIZE];
 
     // pointer to buffer of pktap header
-    struct pktap_header *pktap_hdr =
-            (struct pktap_header *)pktap_hdr_buf;
+    proc_info_t *proc = (proc_info_t *)proc_info_buf;
     packet_hdrs_t packet_hdrs;
 
     // create a handle for divert object
-    divert_t *handle = divert_create(0, DIVERT_FLAG_USE_PKTAP |
-                              DIVERT_FLAG_BLOCK_IO, errmsg);
+    divert_t *handle = divert_create(0, DIVERT_FLAG_BLOCK_IO, errmsg);
 
     // set the error handler to display error information
     divert_set_error_handler(handle, error_handler);
@@ -53,14 +65,12 @@ int main() {
     // register signal handler to exit process gracefully
     divert_set_signal_handler(SIGINT, divert_signal_handler_stop_loop, (void *)handle);
 
-    printf("BPF buffer size: %zu\n", handle->bufsize);
-
     // call the non-blocking main loop
     divert_loop(handle, -1);
 
     while (divert_is_looping(handle)) {
         // read data from the divert handle
-        ssize_t status = divert_read(handle, pktap_hdr_buf,
+        ssize_t status = divert_read(handle, proc_info_buf,
                                      packet_buf, sin_buf);
 
         // the handle is closed, then just break the loop
@@ -80,33 +90,13 @@ int main() {
             puts(errmsg);
         }
 
-        if (pktap_hdr->pth_length > 0) {
-            // if the packet has process information, only print its information
-            printf("\nSend by %s: %d on device: %s\n", pktap_hdr->pth_comm,
-                   pktap_hdr->pth_pid, pktap_hdr->pth_ifname);
-        } else {
-            // else we print detail of that packet
-            divert_print_packet(stderr, ~0u, &packet_hdrs, pktap_hdr);
+        // get actual pid of this packet
+        pid_t cur_pid = proc->pid == -1 ? proc->epid : proc->pid;
+        if (cur_pid == pid) {
+            // print detail of that packet
+            divert_print_packet(stderr, ~0u, &packet_hdrs, NULL);
         }
     }
-
-    // output statics information
-    printf("\nCaptured by BPF device: %llu\n", handle->num_captured);
-    printf("Packets without process info: %llu\n", handle->num_missed);
-    printf("Diverted by divert socket with process info: %llu\n", handle->num_diverted);
-    printf("Accuracy: %f\n", (double)handle->num_diverted /
-                             (handle->num_diverted + handle->num_missed));
-
-    /*
-     * output the statics information of libpcap
-     * the dropped packets means that your network is busy
-     * and some packets are dropped without processing
-     * because the processing speed is not fast enough
-     */
-    struct pcap_stat stats;
-    divert_bpf_stats(handle, &stats);
-    printf("BPF device received: %d, dropped: %d, dropped by driver: %d\n",
-           stats.ps_recv, stats.ps_drop, stats.ps_ifdrop);
 
     // clean the handle to release resources
     if (divert_close(handle, errmsg) == 0) {

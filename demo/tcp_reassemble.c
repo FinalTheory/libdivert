@@ -107,7 +107,7 @@ void tcp_callback(struct tcp_stream *a_tcp, void **this_time_not_needed) {
 
 u_char packet_buf[MAX_PACKET_SIZE];
 u_char sin_buf[2 * sizeof(struct sockaddr)];
-u_char pktap_hdr_buf[2 * sizeof(struct pktap_header)];
+u_char proc_info_buf[2 * sizeof(struct pktap_header)];
 divert_t *handle;
 
 int main() {
@@ -141,7 +141,7 @@ int main() {
 
     while (divert_is_looping(handle)) {
         // read data from the divert handle
-        divert_read(handle, pktap_hdr_buf,
+        divert_read(handle, proc_info_buf,
                     packet_buf, sin_buf);
         // re-inject packets into TCP/IP stack
         divert_reinject(handle, (struct ip *)packet_buf,

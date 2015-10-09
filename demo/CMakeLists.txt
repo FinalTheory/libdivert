@@ -8,8 +8,8 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -fPIC -O2")
 add_executable(packet_proc_pktap packet_proc_pktap.c)
 target_link_libraries(packet_proc_pktap divert)
 
-add_executable(demo_block_read demo_block_read.c)
-target_link_libraries(demo_block_read divert)
+add_executable(packet_by_pid packet_by_pid.c)
+target_link_libraries(packet_by_pid divert)
 
 add_executable(delay_ping delay_ping.c)
 target_link_libraries(delay_ping divert)
