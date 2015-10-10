@@ -20,7 +20,7 @@ void packet_map_insert(struct packet_map_t *mp,
                        in_addr_t _ip_dst,
                        u_short _port_src,
                        u_short _port_dst,
-                       unsigned short _chksum,
+                       u_short _chksum,
                        struct pktap_header *ptr);
 
 struct pktap_header *
@@ -29,7 +29,7 @@ struct pktap_header *
                          in_addr_t _ip_dst,
                          u_short _port_src,
                          u_short _port_dst,
-                         unsigned short _chksum);
+                         u_short _chksum);
 
 size_t packet_map_get_size(struct packet_map_t *mp);
 

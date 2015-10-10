@@ -35,8 +35,6 @@ divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
     divert_handle->flags = flags;
     divert_handle->divert_port = port_number;
 
-    // set default timeout
-    divert_handle->timeout = PACKET_TIME_OUT;
     divert_handle->thread_buffer_size = PACKET_BUFFER_SIZE;
 
     return divert_handle;
@@ -305,13 +303,13 @@ int divert_query_proc_by_packet(divert_t *handle,
     } else {
         goto fail;
     }
-    return 1;
+    return 0;
 
     fail:
     result->pid = -1;
     result->epid = -1;
     result->comm[0] = 0;
-    return 0;
+    return -1;
 }
 
 #define TCPDUMP_MAGIC        0xa1b2c3d4
@@ -994,6 +992,8 @@ int divert_close(divert_t *divert_handle, char *errmsg) {
     if (divert_handle->flags & DIVERT_FLAG_USE_PKTAP) {
         pcap_close(divert_handle->pcap_handle);
         packet_map_free(divert_handle->packet_map);
+    } else {
+        close(divert_handle->kext_fd);
     }
 
     // close the pipe descriptor

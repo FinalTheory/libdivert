@@ -8,7 +8,7 @@
 #include "netinet/ip_fw.h"
 #include "pcap/pcap.h"
 #include "pcap/pcap-int.h"
-#include "packet_info.h"
+#include "packet_hash.h"
 
 /*
  * flags for error handling
@@ -19,20 +19,20 @@
 #define PCAP_BUFFER_FAILURE -4
 #define CALLBACK_NOT_FOUND  -5
 #define PIPE_OPEN_FAILURE   -6
-#define FILE_IO_ERROR       -7
 
 /*
  * default packet parameters
  */
 #define DEFAULT_IPFW_RULE_ID    1
 #define PCAP_DEFAULT_BUFSIZE    524288
-#define PACKET_TIME_OUT         30
+#define PACKET_TIME_OUT         10
 // warning: this value should not greater than SEM_VALUE_MAX
 #define PACKET_BUFFER_SIZE      8192
 #define PACKET_INFO_CACHE_SIZE  10000
 #define MAX_EVENT_COUNT         16
 #define PIPE_BUFFER_SIZE        8
 #define NUM_TCP_STREAMS         2048
+#define HASH_BUCKETS_NUM        8192
 
 /*
  * flags to control divert behaviour
@@ -104,7 +104,6 @@ typedef struct {
     /*
      * statics information
      */
-    u_int64_t timeout;
     u_int64_t current_time_stamp;
     u_int64_t num_missed;
     u_int64_t num_captured;

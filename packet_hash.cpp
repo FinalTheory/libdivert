@@ -2,13 +2,8 @@
 #include <vector>
 #include <bitset>
 #include <cstdlib>
-#include "packet_info.h"
+#include "packet_hash.h"
 
-#ifdef WITH_NIDS
-extern "C" {
-#include "hash.h"
-};
-#endif
 
 using std::swap;
 using std::pair;
@@ -17,7 +12,7 @@ using std::vector;
 using std::unordered_map;
 
 const int bit_size = 2 * (sizeof(in_addr_t) + sizeof(u_short));
-typedef bitset<bit_size> packet_tag_bits;
+typedef bitset <bit_size> packet_tag_bits;
 
 
 class packet_tag_t {
@@ -49,9 +44,6 @@ public:
 class packet_tag_hash {
 public:
     size_t operator()(const packet_tag_t &x) const {
-#ifdef WITH_NIDS
-        return mkhash(x.ip_src, x.port_src, x.ip_dst, x.port_dst);
-#else
         // fill the bit vector
         packet_tag_bits bitvec;
         size_t p = 0, i;
@@ -79,7 +71,6 @@ public:
             exit(EXIT_FAILURE);
         }
         return std::hash<packet_tag_bits>()(bitvec);
-#endif
     }
 
 };

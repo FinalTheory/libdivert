@@ -27,7 +27,7 @@ set(LIB_SOURCE_FILES
         queue.c
         buffer.c
         dump_packet.c
-        packet_info.cpp
+        packet_hash.c
         ipfw_utils.c)
 
 add_library(divert SHARED ${LIB_SOURCE_FILES})
