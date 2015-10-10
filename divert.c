@@ -415,6 +415,16 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
     if (divert_handle->flags & DIVERT_FLAG_USE_PKTAP) {
         nids_params.pcap_desc = divert_handle->pcap_handle;
     }
+
+    // when packets are diverted before sending,
+    // the checksum of that packet is not calculated
+    // because of the checksum offload mechanism
+    // so we need to disable that procedure
+    struct nids_chksum_ctl *chksum_ctl =
+            malloc(sizeof(struct nids_chksum_ctl));
+    memset(chksum_ctl, 0, sizeof(struct nids_chksum_ctl));
+    chksum_ctl->action = NIDS_DONT_CHKSUM;
+    nids_register_chksum_ctl(chksum_ctl, 1);
     nids_init();
 
     divert_handle->is_looping = 1;
@@ -428,6 +438,20 @@ static inline packet_info_t *divert_new_error_packet(u_int64_t flag) {
     new_packet->pktap_hdr = NULL;
     new_packet->time_stamp = flag;
     return new_packet;
+}
+
+static void divert_feed_nids(struct ip *packet) {
+    struct timeval tv;
+    struct timezone tz;
+    struct pcap_pkthdr pkthdr;
+
+    gettimeofday(&tv, &tz);
+    pkthdr.ts.tv_sec = tv.tv_sec;
+    pkthdr.ts.tv_usec = tv.tv_usec;
+    pkthdr.caplen = pkthdr.len = ntohs(packet->ip_len);
+    pkthdr.comment[0] = 0;
+
+    nids_pcap_handler(NULL, &pkthdr, (u_char *)packet);
 }
 
 static void *divert_thread_callback(void *arg) {
@@ -448,6 +472,9 @@ static void *divert_thread_callback(void *arg) {
                 callback(callback_args, packet->pktap_hdr,
                          packet->ip_data, packet->sin);
             } else {
+                if (handle->flags & DIVERT_FLAG_TCP_REASSEM) {
+                    divert_feed_nids(packet->ip_data);
+                }
                 divert_query_proc_by_packet(handle, packet->ip_data,
                                             packet->sin, &proc_info);
                 callback(callback_args, &proc_info,
@@ -568,7 +595,6 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
         } else {
             for (int i = 0; i < num_events; i++) {
                 uintptr_t fd = events[i].ident;
-                //intptr_t data_size = events[i].data;
                 if (fd == divert_handle->bpf_fd) {
                     // returns a packet of BPF structure
                     num_bpf = read(divert_handle->bpf_fd,
@@ -588,10 +614,7 @@ static void divert_loop_with_pktap(divert_t *divert_handle, int count) {
                                     struct pcap_pkthdr pkthdr;
                                     pkthdr.ts.tv_sec = packet_hdrs.bhep_hdr->bh_tstamp.tv_sec;
                                     pkthdr.ts.tv_usec = packet_hdrs.bhep_hdr->bh_tstamp.tv_usec;
-                                    pkthdr.caplen = ntohs(packet_hdrs.ip_hdr->ip_len);
-                                    pkthdr.len = packet_hdrs.bhep_hdr->bh_datalen
-                                                 - (u_int32_t)((u_char *)(packet_hdrs.ip_hdr)
-                                                               - (u_char *)(packet_hdrs.bhep_hdr));
+                                    pkthdr.len = pkthdr.caplen = ntohs(packet_hdrs.ip_hdr->ip_len);
                                     pkthdr.comment[0] = 0;
 
                                     // call the pcap handler of libnids
@@ -906,6 +929,9 @@ ssize_t divert_read(divert_t *handle,
                     memset(pktap_hdr, 0, sizeof(struct pktap_header));
                 }
             } else {
+                if (handle->flags & DIVERT_FLAG_TCP_REASSEM) {
+                    divert_feed_nids(packet->ip_data);
+                }
                 divert_query_proc_by_packet(handle, packet->ip_data,
                                             packet->sin, (proc_info_t *)pktap_hdr);
             }
