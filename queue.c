@@ -2,9 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-queue_t *queue_create() {
+queue_t *queue_create(queue_free_function_t free_func) {
     queue_t *queue = malloc(sizeof(queue_t));
     memset(queue, 0, sizeof(queue_t));
+    queue->free_data_func = free_func;
     return queue;
 }
 
@@ -78,8 +79,7 @@ static inline void queue_delete_node(queue_t *queue,
 queue_node_t *queue_search_and_drop(queue_t *queue,
                                     void *data, void *args,
                                     queue_compare_function_t cmp,
-                                    queue_drop_function_t drop,
-                                    queue_free_function_t destroy) {
+                                    queue_drop_function_t drop) {
     queue_node_t *current_node = queue->head;
     queue_node_t *prev_node = NULL;
     while (current_node != NULL) {
@@ -91,7 +91,7 @@ queue_node_t *queue_search_and_drop(queue_t *queue,
         // if current data should be dropped
         if (drop(current_node->data, args)) {
             queue_delete_node(queue, prev_node, current_node->next);
-            destroy(current_node->data);
+            queue->free_data_func(current_node->data);
             free(current_node);
         } else {
             prev_node = current_node;
@@ -99,4 +99,18 @@ queue_node_t *queue_search_and_drop(queue_t *queue,
         current_node = current_node->next;
     }
     return NULL;
+}
+
+void queue_destroy(queue_t *queue) {
+    if (queue != NULL) {
+        queue_node_t *prev = NULL;
+        for (queue_node_t *cur = queue->head;
+             cur != NULL; ) {
+            queue->free_data_func(cur->data);
+            prev = cur;
+            cur = cur->next;
+            free(prev);
+        }
+        free(queue);
+    }
 }

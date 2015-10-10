@@ -26,6 +26,10 @@ struct packet_map_t *packet_map_create() {
     return result;
 }
 
+static void free_queue_data(void *ptr) {
+    free(ptr);
+}
+
 void packet_map_insert(struct packet_map_t *mp,
                        in_addr_t _ip_src,
                        in_addr_t _ip_dst,
@@ -36,7 +40,7 @@ void packet_map_insert(struct packet_map_t *mp,
     int idx = mkhash(_ip_src, _port_src, _ip_dst, _port_dst) % HASH_BUCKETS_NUM;
     queue_t *q = mp->buckets[idx];
     if (q == NULL) {
-        mp->buckets[idx] = queue_create();
+        mp->buckets[idx] = queue_create(free_queue_data);
         q = mp->buckets[idx];
     }
     if (ptr != NULL) {
@@ -75,10 +79,6 @@ static int should_drop(void *data, void *args) {
             ((__node_data_t *)data)->tv.tv_sec > PACKET_TIME_OUT);
 }
 
-static void free_packet_data(void *ptr) {
-    free(ptr);
-}
-
 struct pktap_header *
 packet_map_query(struct packet_map_t *mp,
                  in_addr_t _ip_src,
@@ -89,6 +89,7 @@ packet_map_query(struct packet_map_t *mp,
     int idx = mkhash(_ip_src, _port_src, _ip_dst, _port_dst) % HASH_BUCKETS_NUM;
     queue_t *q = mp->buckets[idx];
     if (q != NULL) {
+        size_t queue_size = q->size;
         __node_data_t data;
         data.ip_src = _ip_src;
         data.ip_dst = _ip_dst;
@@ -100,7 +101,10 @@ packet_map_query(struct packet_map_t *mp,
         queue_node_t *node =
                 queue_search_and_drop(q, &data,
                                       gettimeofday(&tv, &tz) == 0 ? &tv : NULL,
-                                      compare_func, should_drop, free_packet_data);
+                                      compare_func, should_drop);
+        // elements of queue may be dropped
+        // so update the size of packet map
+        mp->size -= (queue_size - q->size);
         return node == NULL ? NULL : &(((__node_data_t *)node->data)->pktap_data);
     } else {
         return NULL;
@@ -117,6 +121,9 @@ void packet_map_clean(struct packet_map_t *mp) {
 
 void packet_map_free(struct packet_map_t *mp) {
     if (mp != NULL) {
+        for (int i = 0; i < HASH_BUCKETS_NUM; i++) {
+            queue_destroy(mp->buckets[i]);
+        }
         free(mp->buckets);
         free(mp);
     }
