@@ -20,18 +20,21 @@ struct so_procinfo {
 };
 #endif
 
-struct qry_data
-{
-    // store query result
+#ifndef TUPLE4
+struct tuple4 {
+    u_short source;
+    u_short dest;
+    u_int saddr;
+    u_int daddr;
+};
+#endif
+
+struct qry_data {
     pid_t pid;
     pid_t epid;
     struct so_procinfo proc;
-    // store query info
     char iface[8];
-    u_short source;
-    u_short dest;
-    u_int32_t saddr;
-    u_int32_t daddr;
+    struct tuple4 sock_info;
     u_char proto;
 };
 

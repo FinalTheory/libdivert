@@ -19,6 +19,7 @@
 #define PCAP_BUFFER_FAILURE -4
 #define CALLBACK_NOT_FOUND  -5
 #define PIPE_OPEN_FAILURE   -6
+#define NIDS_FAILURE        -7
 
 /*
  * default packet parameters
@@ -181,6 +182,9 @@ int divert_query_proc_by_packet(divert_t *handle,
                                 struct ip *ip_hdr,
                                 struct sockaddr *sin,
                                 proc_info_t *result);
+
+struct tcp_stream *
+        divert_find_tcp_stream(struct ip *ip_hdr);
 
 int divert_init_pcap(FILE *fp, char *errmsg);
 

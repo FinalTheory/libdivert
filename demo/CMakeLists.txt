@@ -19,3 +19,6 @@ target_link_libraries(tcp_reassemble divert)
 
 add_executable(dump_divert dump_divert.c)
 target_link_libraries(dump_divert divert)
+
+add_executable(gfw_simulator gfw_simulator.c)
+target_link_libraries(gfw_simulator divert)

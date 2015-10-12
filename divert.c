@@ -16,6 +16,7 @@
 #include "dump_packet.h"
 #include "assert.h"
 #include "nids.h"
+#define TUPLE4
 #include "KernFunc.h"
 
 /*
@@ -250,36 +251,44 @@ static int divert_init_kernel_ctl_iface(int *fd, char *errmsg) {
     return 0;
 }
 
+int divert_extract_raw_socket_info(struct ip *ip_hdr, struct tuple4 *result) {
+    bzero(result, sizeof(struct tuple4));
+    size_t ip_len = (ip_hdr->ip_hl) << 2;
+    if (ip_len < MIN_IP_HEADER_SIZE) {
+        return -1;
+    }
+    u_char *payload = (u_char *)ip_hdr + ip_len;
+    result->saddr = ip_hdr->ip_src.s_addr;
+    result->daddr = ip_hdr->ip_dst.s_addr;
+    if (ip_hdr->ip_p == IPPROTO_TCP) {
+        struct tcphdr *tcp_hdr = (struct tcphdr *)payload;
+        result->source = tcp_hdr->th_sport;
+        result->dest = tcp_hdr->th_dport;
+    } else if (ip_hdr->ip_p == IPPROTO_UDP) {
+        struct udphdr *udp_hdr = (struct udphdr *)payload;
+        result->source = udp_hdr->uh_sport;
+        result->dest = udp_hdr->uh_dport;
+    } else {
+        return -1;
+    }
+    return 0;
+}
+
 int divert_query_proc_by_packet(divert_t *handle,
                                 struct ip *ip_hdr,
                                 struct sockaddr *sin,
                                 proc_info_t *result) {
-    u_short sport = 0, dport = 0;
-    size_t ip_len = (ip_hdr->ip_hl) << 2;
-    u_char *payload = (u_char *)ip_hdr + ip_len;
-    if (ip_hdr->ip_p == IPPROTO_TCP) {
-        struct tcphdr *tcp_hdr = (struct tcphdr *)payload;
-        sport = tcp_hdr->th_sport;
-        dport = tcp_hdr->th_dport;
-    } else if (ip_hdr->ip_p == IPPROTO_UDP) {
-        struct udphdr *udp_hdr = (struct udphdr *)payload;
-        sport = udp_hdr->uh_sport;
-        dport = udp_hdr->uh_dport;
-    } else {
-        goto fail;
-    }
-
     struct qry_data input_data;
     socklen_t len = sizeof(input_data);
     memset(&input_data, 0, sizeof(input_data));
+    input_data.proto = ip_hdr->ip_p;
     strncpy(input_data.iface,
             ((struct sockaddr_in *)sin)->sin_zero,
             sizeof(input_data.iface));
-    input_data.saddr = ip_hdr->ip_src.s_addr;
-    input_data.daddr = ip_hdr->ip_dst.s_addr;
-    input_data.proto = ip_hdr->ip_p;
-    input_data.source = sport;
-    input_data.dest = dport;
+    if (divert_extract_raw_socket_info(ip_hdr,
+                                       &input_data.sock_info) != 0) {
+        goto fail;
+    }
 
     int ctl_flag = 0;
     if (divert_is_outbound(sin)) {
@@ -310,6 +319,29 @@ int divert_query_proc_by_packet(divert_t *handle,
     result->epid = -1;
     result->comm[0] = 0;
     return -1;
+}
+
+struct tcp_stream *
+divert_find_tcp_stream(struct ip *ip_hdr) {
+    struct tuple4 sock_info, reversed;
+    if (divert_extract_raw_socket_info(ip_hdr,
+                                       &sock_info) != 0) {
+        return NULL;
+    } else {
+        // convert into host sequence
+        sock_info.source = ntohs(sock_info.source);
+        sock_info.dest = ntohs(sock_info.dest);
+    }
+    struct tcp_stream *a_tcp;
+    if ((a_tcp = nids_find_tcp_stream(&sock_info)) != NULL) {
+        return a_tcp;
+    } else {
+        reversed.source = sock_info.dest;
+        reversed.dest = sock_info.source;
+        reversed.saddr = sock_info.daddr;
+        reversed.daddr = sock_info.saddr;
+        return nids_find_tcp_stream(&reversed);
+    }
 }
 
 #define TCPDUMP_MAGIC        0xa1b2c3d4
@@ -425,7 +457,10 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
     memset(chksum_ctl, 0, sizeof(struct nids_chksum_ctl));
     chksum_ctl->action = NIDS_DONT_CHKSUM;
     nids_register_chksum_ctl(chksum_ctl, 1);
-    nids_init();
+    if (!nids_init()) {
+        strcpy(errmsg, nids_errbuf);
+        return NIDS_FAILURE;
+    }
 
     divert_handle->is_looping = 1;
 
