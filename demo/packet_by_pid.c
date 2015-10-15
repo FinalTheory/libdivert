@@ -65,6 +65,8 @@ int main(int argc, char *argv[]) {
     // register signal handler to exit process gracefully
     divert_set_signal_handler(SIGINT, divert_signal_handler_stop_loop, (void *)handle);
 
+    divert_set_filter(handle, "ip from any to not 0.0.0.255:24 via en0", errmsg);
+
     // call the non-blocking main loop
     divert_loop(handle, -1);
 

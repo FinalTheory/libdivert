@@ -88,12 +88,18 @@ int divert_set_pcap_filter(divert_t *divert_handle, char *pcap_filter, char *err
 }
 
 int divert_set_filter(divert_t *handle, char *divert_filter, char *errmsg) {
+    size_t rule_len = strlen(divert_filter);
+    char *divert_filter_new = malloc(rule_len + 1);
+    strcpy(divert_filter_new, divert_filter);
     // do not use the packet queue
     // because the size may grow and not cleaned in time
     if (ipfw_delete(DEFAULT_IPFW_RULE_ID, errmsg) != 0) {
         return -1;
     }
-    return ipfw_setup(divert_filter, (u_short)handle->divert_port, errmsg);
+    int ret_val = ipfw_setup(divert_filter_new,
+                             (u_short)handle->divert_port, errmsg);
+    free(divert_filter_new);
+    return ret_val;
 }
 
 static int divert_init_pcap_handle(divert_t *divert_handle, char *errmsg) {
