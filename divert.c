@@ -498,7 +498,6 @@ static void divert_feed_nids(struct ip *packet) {
 }
 
 static void *divert_thread_callback(void *arg) {
-    proc_info_t proc_info;
     packet_info_t *packet;
     divert_t *handle = (divert_t *)arg;
     packet_buf_t *buf = handle->thread_buffer;
@@ -515,17 +514,16 @@ static void *divert_thread_callback(void *arg) {
                 callback(callback_args, packet->pktap_hdr,
                          packet->ip_data, packet->sin);
             } else {
-                divert_query_proc_by_packet(handle, packet->ip_data,
-                                            packet->sin, &proc_info);
                 if (handle->flags & DIVERT_FLAG_TCP_REASSEM) {
-                    tcp_stream_pid = proc_info.pid;
-                    tcp_stream_epid = proc_info.epid;
+                    tcp_stream_pid = packet->proc_info->pid;
+                    tcp_stream_epid = packet->proc_info->epid;
                     divert_feed_nids(packet->ip_data);
                 }
-                callback(callback_args, &proc_info,
+                callback(callback_args, packet->proc_info,
                          packet->ip_data, packet->sin);
             }
             free(packet->ip_data);
+            free(packet->proc_info);
             free(packet->sin);
             free(packet);
         } else if (packet->time_stamp &
@@ -850,6 +848,10 @@ static void divert_loop_with_kext(divert_t *divert_handle, int count) {
                             new_packet->pktap_hdr = NULL;
                             // allocate memory
                             new_packet->ip_data = malloc(ip_length);
+                            new_packet->proc_info = malloc(sizeof(proc_info_t));
+                            divert_query_proc_by_packet(divert_handle,
+                                                        packet_hdrs.ip_hdr, sin,
+                                                        new_packet->proc_info);
                             // and copy data
                             memcpy(new_packet->ip_data, packet_hdrs.ip_hdr, ip_length);
                             divert_buf_insert(divert_handle->thread_buffer, new_packet);
@@ -974,16 +976,16 @@ ssize_t divert_read(divert_t *handle,
                     memset(pktap_hdr, 0, sizeof(struct pktap_header));
                 }
             } else {
-                divert_query_proc_by_packet(handle, packet->ip_data,
-                                            packet->sin, (proc_info_t *)pktap_hdr);
                 if (handle->flags & DIVERT_FLAG_TCP_REASSEM) {
-                    tcp_stream_pid = ((proc_info_t *)pktap_hdr)->pid;
-                    tcp_stream_epid = ((proc_info_t *)pktap_hdr)->epid;
+                    tcp_stream_pid = packet->proc_info->pid;
+                    tcp_stream_epid = packet->proc_info->epid;
                     divert_feed_nids(packet->ip_data);
                 }
+                memcpy(pktap_hdr, packet->proc_info, sizeof(proc_info_t));
             }
             // free the allocated memory
             free(packet->ip_data);
+            free(packet->proc_info);
             free(packet->sin);
             free(packet);
             ret_val = 0;
