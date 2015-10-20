@@ -1,9 +1,14 @@
 #include "divert.h"
 #include "string.h"
 #include "nids.h"
-#include <unistd.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
+#include <libproc.h>
+#include <divert.h>
+
+
+static pid_t pid;
+static char proc_name_buf[128];
 
 
 void error_handler(u_int64_t flags) {
@@ -29,76 +34,51 @@ void error_handler(u_int64_t flags) {
 char *adres(struct tuple4 addr) {
     static char buf[256];
     strcpy (buf, int_ntoa(addr.saddr));
-    sprintf (buf + strlen(buf), ",%i,", addr.source);
+    sprintf (buf + strlen(buf), "(%i)-", addr.source);
     strcat (buf, int_ntoa(addr.daddr));
-    sprintf (buf + strlen(buf), ",%i", addr.dest);
+    sprintf (buf + strlen(buf), "(%i)", addr.dest);
     return buf;
 }
 
 
 void tcp_callback(struct tcp_stream *a_tcp, void **this_time_not_needed) {
-    char buf[1024];
-    strcpy (buf, adres(a_tcp->addr)); // we put conn params into buf
+    char addr_buf[1024];
+    strcpy (addr_buf, adres(a_tcp->addr)); // we put conn params into buf
     if (a_tcp->nids_state == NIDS_JUST_EST) {
-        // connection described by a_tcp is established
-        // here we decide, if we wish to follow this stream
-        // sample condition: if (a_tcp->addr.dest!=23) return;
-        // in this simple app we follow each stream, so..
         a_tcp->client.collect++; // we want data received by a client
         a_tcp->server.collect++; // and by a server, too
-        a_tcp->server.collect_urg++; // we want urgent data received by a
-        // server
-#ifdef WE_WANT_URGENT_DATA_RECEIVED_BY_A_CLIENT
-        a_tcp->client.collect_urg++; // if we don't increase this value,
-                                   // we won't be notified of urgent data
-                                   // arrival
-#endif
-        fprintf(stderr, "%s established\n", buf);
+        fprintf(stderr, "%s established\n", addr_buf);
+        // clean the data file
+        FILE *fp = fopen(addr_buf, "wb");
+        fclose(fp);
         return;
     }
     if (a_tcp->nids_state == NIDS_CLOSE) {
         // connection has been closed normally
-        fprintf(stderr, "%s closing\n", buf);
+        fprintf(stderr, "%s closing\n", addr_buf);
         return;
     }
     if (a_tcp->nids_state == NIDS_RESET) {
         // connection has been closed by RST
-        fprintf(stderr, "%s reset\n", buf);
+        fprintf(stderr, "%s reset\n", addr_buf);
         return;
     }
 
     if (a_tcp->nids_state == NIDS_DATA) {
-        // new data has arrived; gotta determine in what direction
-        // and if it's urgent or not
-
+        //fprintf(stderr, "Data of connection: %s\n", addr_buf);
+        // new data has arrived
+        // gotta determine in what direction
         struct half_stream *hlf;
 
-        if (a_tcp->server.count_new_urg) {
-            // new byte of urgent data has arrived
-            strcat(buf, "(urgent->)");
-            buf[strlen(buf) + 1] = 0;
-            buf[strlen(buf)] = a_tcp->server.urgdata;
-            write(1, buf, strlen(buf));
-            return;
-        }
-        // We don't have to check if urgent data to client has arrived,
-        // because we haven't increased a_tcp->client.collect_urg variable.
-        // So, we have some normal data to take care of.
         if (a_tcp->client.count_new) {
             // new data for client
             hlf = &a_tcp->client; // from now on, we will deal with hlf var,
-            // which will point to client side of conn
-            strcat (buf, "(<-)"); // symbolic direction of data
-        }
-        else {
+        } else {
             hlf = &a_tcp->server; // analogical
-            strcat (buf, "(->)");
         }
-        fprintf(stderr, "%s", buf); // we print the connection parameters
-        // (saddr, daddr, sport, dport) accompanied
-        // by data flow direction (-> or <-)
-
-        write(2, hlf->data, (size_t)hlf->count_new); // we print the newly arrived data
+        FILE *fp = fopen(addr_buf, "a");
+        fwrite(hlf->data, 1, (size_t)hlf->count_new, fp);
+        fclose(fp);
     }
     return;
 }
@@ -110,14 +90,30 @@ u_char sin_buf[2 * sizeof(struct sockaddr)];
 u_char proc_info_buf[2 * sizeof(struct pktap_header)];
 divert_t *handle;
 
-int main() {
+int main(int argc, char *argv[]) {
+    if (argc == 2) {
+        pid = atoi(argv[1]);
+    } else {
+        puts("Usage: ./tcp_reassemble <PID>");
+        exit(EXIT_FAILURE);
+    }
+
+    proc_name(pid, proc_name_buf, sizeof(proc_name_buf));
+    printf("Watching packets of %s: %d\n", proc_name_buf, pid);
+
     // buffer for error information
     char errmsg[PCAP_ERRBUF_SIZE];
 
     // create a handle for divert object
-    handle = divert_create(0, DIVERT_FLAG_USE_PKTAP |
-                              DIVERT_FLAG_BLOCK_IO |
+    handle = divert_create(0, DIVERT_FLAG_BLOCK_IO |
                               DIVERT_FLAG_TCP_REASSEM, errmsg);
+
+    FILE *fp1 = fopen("data.pcap", "w");
+    FILE *fp2 = fopen("data_all.pcap", "w");
+    FILE *fp3 = fopen("data_unknown.pcap", "w");
+    divert_init_pcap(fp1, errmsg);
+    divert_init_pcap(fp2, errmsg);
+    divert_init_pcap(fp3, errmsg);
 
     // set the error handler to display error information
     divert_set_error_handler(handle, error_handler);
@@ -132,7 +128,7 @@ int main() {
     // register signal handler to exit process gracefully
     divert_set_signal_handler(SIGINT, divert_signal_handler_stop_loop, (void *)handle);
 
-    printf("BPF buffer size: %zu\n", handle->bufsize);
+    printf("Packet buffer size: %zu\n", handle->bufsize);
 
     // call the non-blocking main loop
     divert_loop(handle, -1);
@@ -143,33 +139,30 @@ int main() {
         // read data from the divert handle
         divert_read(handle, proc_info_buf,
                     packet_buf, sin_buf);
+
+        pid_t cur_pid = ((proc_info_t *)proc_info_buf)->pid == -1 ?
+                        ((proc_info_t *)proc_info_buf)->epid :
+                        ((proc_info_t *)proc_info_buf)->pid;
+        if (cur_pid == pid) {
+            divert_dump_pcap((struct ip *)packet_buf, fp1, errmsg);
+            divert_dump_pcap((struct ip *)packet_buf, fp2, errmsg);
+        } else if (cur_pid == -1) {
+            divert_dump_pcap((struct ip *)packet_buf, fp2, errmsg);
+            divert_dump_pcap((struct ip *)packet_buf, fp3, errmsg);
+        }
+
         // re-inject packets into TCP/IP stack
         divert_reinject(handle, (struct ip *)packet_buf,
                         -1, (struct sockaddr *)sin_buf);
     }
 
-    // output statics information
-    printf("\nCaptured by BPF device: %llu\n", handle->num_captured);
-    printf("Packets without process info: %llu\n", handle->num_missed);
-    printf("Diverted by divert socket with process info: %llu\n", handle->num_diverted);
-    printf("Accuracy: %f\n", (double)handle->num_diverted /
-                             (handle->num_diverted + handle->num_missed));
-
-    /*
-     * output the statics information of libpcap
-     * the dropped packets means that your network is busy
-     * and some packets are dropped without processing
-     * because the processing speed is not fast enough
-     */
-    struct pcap_stat stats;
-    divert_bpf_stats(handle, &stats);
-    printf("BPF device received: %d, dropped: %d, dropped by driver: %d\n",
-           stats.ps_recv, stats.ps_drop, stats.ps_ifdrop);
-
     // clean the handle to release resources
     if (divert_close(handle, errmsg) == 0) {
         puts("Successfully cleaned.");
     }
+    fclose(fp1);
+    fclose(fp2);
+    fclose(fp3);
 
     return 0;
 }
