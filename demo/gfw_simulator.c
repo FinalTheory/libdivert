@@ -2,11 +2,31 @@
 #include "nids.h"
 #include <stdlib.h>
 #include <dump_packet.h>
+#include "libproc.h"
 
-void tcp_callback(struct tcp_stream *a_tcp, void **this_time_not_needed) {
+// PID of process
+pid_t pid;
+// connection reset rate
+double rate;
+
+// generate random float number from 0 to 1
+inline double rand_double() {
+    return (double)rand() / (double)RAND_MAX;
+}
+
+void tcp_callback(struct tcp_stream *a_tcp,
+                  void **not_needed,
+                  void *data) {
     if (a_tcp->nids_state == NIDS_JUST_EST) {
         a_tcp->client.collect++;
         a_tcp->server.collect++;
+    }
+    if (a_tcp->nids_state == NIDS_DATA) {
+        if ((a_tcp->pid == pid ||
+             a_tcp->epid == pid) &&
+            rand_double() < rate) {
+            nids_killtcp(a_tcp);
+        }
     }
 }
 
@@ -15,14 +35,9 @@ void tcp_callback(struct tcp_stream *a_tcp, void **this_time_not_needed) {
 u_char packet_buf[MAX_PACKET_SIZE + 10];
 u_char sin_buf[2 * sizeof(struct sockaddr)];
 u_char proc_info_buf[2 * sizeof(struct pktap_header)];
+char proc_name_buf[64];
 divert_t *handle;
 
-inline double rand_double() {
-    return (double)rand() / (double)RAND_MAX;
-}
-
-pid_t pid;
-double rate;
 
 int main(int argc, char *argv[]) {
     // set random seed
@@ -36,6 +51,9 @@ int main(int argc, char *argv[]) {
         puts("Usage: ./gfw_simulator <PID> <reset_rate>");
         exit(EXIT_FAILURE);
     }
+
+    proc_name(pid, proc_name_buf, sizeof(proc_name_buf));
+    printf("Watching packets of %s: %d\n", proc_name_buf, pid);
 
     // statistics
     int diverted = 0, missed = 0;
@@ -81,15 +99,7 @@ int main(int argc, char *argv[]) {
 
             if (headers.tcp_hdr != NULL) {
                 if (headers.tcp_hdr->th_flags & TH_RST) {
-                    puts("TCP RST packet");
-                } else {
-                    struct tcp_stream *tcp =
-                            divert_find_tcp_stream((struct ip *)packet_buf);
-                    if (tcp != NULL && tcp->nids_state == NIDS_DATA) {
-                        if (rand_double() < rate) {
-                            nids_killtcp(tcp);
-                        }
-                    }
+                    puts("Found TCP RST packet!");
                 }
             }
         }

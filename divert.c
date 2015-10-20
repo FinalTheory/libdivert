@@ -19,6 +19,8 @@
 #define TUPLE4
 #include "KernFunc.h"
 
+extern pid_t tcp_stream_pid, tcp_stream_epid;
+
 /*
  * only constant and parameter variables could be assigned here
  * no dynamic memory allocation
@@ -513,11 +515,13 @@ static void *divert_thread_callback(void *arg) {
                 callback(callback_args, packet->pktap_hdr,
                          packet->ip_data, packet->sin);
             } else {
-                if (handle->flags & DIVERT_FLAG_TCP_REASSEM) {
-                    divert_feed_nids(packet->ip_data);
-                }
                 divert_query_proc_by_packet(handle, packet->ip_data,
                                             packet->sin, &proc_info);
+                if (handle->flags & DIVERT_FLAG_TCP_REASSEM) {
+                    tcp_stream_pid = proc_info.pid;
+                    tcp_stream_epid = proc_info.epid;
+                    divert_feed_nids(packet->ip_data);
+                }
                 callback(callback_args, &proc_info,
                          packet->ip_data, packet->sin);
             }
@@ -970,11 +974,13 @@ ssize_t divert_read(divert_t *handle,
                     memset(pktap_hdr, 0, sizeof(struct pktap_header));
                 }
             } else {
-                if (handle->flags & DIVERT_FLAG_TCP_REASSEM) {
-                    divert_feed_nids(packet->ip_data);
-                }
                 divert_query_proc_by_packet(handle, packet->ip_data,
                                             packet->sin, (proc_info_t *)pktap_hdr);
+                if (handle->flags & DIVERT_FLAG_TCP_REASSEM) {
+                    tcp_stream_pid = ((proc_info_t *)pktap_hdr)->pid;
+                    tcp_stream_epid = ((proc_info_t *)pktap_hdr)->epid;
+                    divert_feed_nids(packet->ip_data);
+                }
             }
             // free the allocated memory
             free(packet->ip_data);
