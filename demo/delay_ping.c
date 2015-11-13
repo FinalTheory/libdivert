@@ -2,17 +2,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 
 useconds_t delay = 400;
 
 void error_handler(u_int64_t flags) {
-    if (flags & DIVERT_ERROR_BPF_INVALID) {
-        puts("Invalid BPF packet.");
-    }
-    if (flags & DIVERT_ERROR_BPF_NODATA) {
-        puts("Didn't read data from BPF device.");
-    }
     if (flags & DIVERT_ERROR_DIVERT_NODATA) {
         puts("Didn't read data from divert socket or data error.");
     }
@@ -83,12 +78,12 @@ int main(int argc, char *argv[]) {
     }
 
     // buffer for error information
-    char errmsg[PCAP_ERRBUF_SIZE];
+    char errmsg[DIVERT_ERRBUF_SIZE];
     void *ret;
 
     // create a handle for divert object
     // not using any flag, just divert all packets
-    divert_t *handle = divert_create(0, 0u, errmsg);
+    divert_t *handle = divert_create(0, 0, errmsg);
 
     // set the callback function to handle packets
     divert_set_callback(handle, callback, handle);

@@ -5,9 +5,6 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -fPIC -O2")
 
 # below executables are demos
 
-add_executable(packet_proc_pktap packet_proc_pktap.c)
-target_link_libraries(packet_proc_pktap divert)
-
 add_executable(packet_by_pid packet_by_pid.c)
 target_link_libraries(packet_by_pid divert)
 

@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <libproc.h>
-#include <divert.h>
 
 
 static pid_t pid;
@@ -12,12 +11,6 @@ static char proc_name_buf[128];
 
 
 void error_handler(u_int64_t flags) {
-    if (flags & DIVERT_ERROR_BPF_INVALID) {
-        puts("Invalid BPF packet.");
-    }
-    if (flags & DIVERT_ERROR_BPF_NODATA) {
-        puts("Didn't read data from BPF device.");
-    }
     if (flags & DIVERT_ERROR_DIVERT_NODATA) {
         puts("Didn't read data from divert socket or data error.");
     }
@@ -86,8 +79,8 @@ void tcp_callback(struct tcp_stream *a_tcp, void **this_time_not_needed) {
 #define MAX_PACKET_SIZE 65535
 
 u_char packet_buf[MAX_PACKET_SIZE];
-u_char sin_buf[2 * sizeof(struct sockaddr)];
-u_char proc_info_buf[2 * sizeof(struct pktap_header)];
+u_char sin_buf[sizeof(struct sockaddr) + 10];
+u_char proc_info_buf[sizeof(proc_info_t) + 10];
 divert_t *handle;
 
 int main(int argc, char *argv[]) {
@@ -102,7 +95,7 @@ int main(int argc, char *argv[]) {
     printf("Watching packets of %s: %d\n", proc_name_buf, pid);
 
     // buffer for error information
-    char errmsg[PCAP_ERRBUF_SIZE];
+    char errmsg[DIVERT_ERRBUF_SIZE];
 
     // create a handle for divert object
     handle = divert_create(0, DIVERT_FLAG_BLOCK_IO |

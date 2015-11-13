@@ -2,21 +2,16 @@
 #define LIBDIVERT_DIVERT_H
 
 #include "buffer.h"
-#include "net/bpf.h"
-#include "net/pktap.h"
+#include <stdio.h>
 #include <netinet/ip.h>
 #include "netinet/ip_fw.h"
-#include "pcap/pcap.h"
-#include "pcap/pcap-int.h"
-#include "packet_hash.h"
 
 /*
  * flags for error handling
  */
-#define PCAP_FAILURE        -1
 #define DIVERT_FAILURE      -2
 #define FIREWALL_FAILURE    -3
-#define PCAP_BUFFER_FAILURE -4
+#define DIVERT_BUF_FAILURE  -4
 #define CALLBACK_NOT_FOUND  -5
 #define PIPE_OPEN_FAILURE   -6
 #define NIDS_FAILURE        -7
@@ -25,15 +20,15 @@
  * default packet parameters
  */
 #define DEFAULT_IPFW_RULE_ID    1
-#define PCAP_DEFAULT_BUFSIZE    524288
-#define PACKET_TIME_OUT         10
-// warning: this value should not greater than SEM_VALUE_MAX
-#define PACKET_BUFFER_SIZE      8192
-#define PACKET_INFO_CACHE_SIZE  10000
 #define MAX_EVENT_COUNT         16
-#define PIPE_BUFFER_SIZE        8
 #define NUM_TCP_STREAMS         2048
-#define HASH_BUCKETS_NUM        8192
+
+// some default buffer size
+// warning: PACKET_BUFFER_SIZE should never be greater than SEM_VALUE_MAX
+#define PACKET_BUFFER_SIZE      8192
+#define PIPE_BUFFER_SIZE        8
+#define DIVERT_ERRBUF_SIZE      256
+#define DIVERT_DEFAULT_BUFSIZE  524288
 
 /*
  * flags to control divert behaviour
@@ -41,8 +36,7 @@
  * or just divert the raw IP packets
  */
 
-#define DIVERT_FLAG_USE_PKTAP    (1u)
-#define DIVERT_FLAG_AUTO_FREE    (1u << 1)
+#define DIVERT_FLAG_FAST_EXIT    (1u << 1)
 #define DIVERT_FLAG_BLOCK_IO     (1u << 2)
 #define DIVERT_FLAG_TCP_REASSEM  (1u << 3)
 
@@ -51,13 +45,11 @@
  */
 #define DIVERT_READ_EOF             (-1)
 #define DIVERT_READ_UNKNOWN_FLAG    (-2)
-#define DIVERT_RAW_BPF_PACKET       (1u)
-#define DIVERT_RAW_IP_PACKET        (1u << 1)
-#define DIVERT_ERROR_BPF_INVALID    (1u << 2)
-#define DIVERT_ERROR_BPF_NODATA     (1u << 3)
-#define DIVERT_ERROR_DIVERT_NODATA  (1u << 4)
-#define DIVERT_STOP_LOOP            (1u << 5)
-#define DIVERT_ERROR_KQUEUE         (1u << 6)
+#define DIVERT_RAW_IP_PACKET        (1u)
+#define DIVERT_ERROR_DIVERT_NODATA  (1u << 1)
+#define DIVERT_STOP_LOOP            (1u << 2)
+#define DIVERT_ERROR_KQUEUE         (1u << 3)
+#define DIVERT_ERROR_INVALID_IP     (1u << 3)
 
 // typedef for divert callback function
 typedef void (*divert_callback_t)(void *args, void *pktap_hdr,
@@ -75,7 +67,6 @@ typedef struct {
     /*
      * file descriptors
      */
-    int bpf_fd;                     // file descriptor of BPF device
     int divert_fd;                  // file descriptor of divert socket
     int kext_fd;                    // file descriptor for kernel-to-userland communication
     int divert_port;                // port bind to divert socket
@@ -85,29 +76,19 @@ typedef struct {
     /*
      * buffer things
      */
-    u_char *bpf_buffer;
     u_char *divert_buffer;
     size_t bufsize;
 
     /*
      * pcap handler
      */
-    pcap_t *pcap_handle;            // handle for pcap structure
     packet_buf_t *thread_buffer;    // buffer for labeled packet
     size_t thread_buffer_size;      // buffer size of labeled packet
 
     /*
-     * map from packet info (ip src, dst, port src, dst)
-     * to its process information
-     */
-    struct packet_map_t *packet_map;
-
-    /*
      * statics information
      */
-    u_int64_t current_time_stamp;
-    u_int64_t num_missed;
-    u_int64_t num_captured;
+    u_int64_t num_unknown;
     u_int64_t num_diverted;
 
     /*
@@ -121,9 +102,6 @@ typedef struct {
 } divert_t;
 
 typedef struct {
-    struct bpf_hdr_ext *bhep_hdr;
-    struct pktap_header *pktap_hdr;
-    struct ether_header *ether_hdr;
     struct ip *ip_hdr;
     struct tcphdr *tcp_hdr;
     struct udphdr *udp_hdr;
@@ -143,8 +121,7 @@ typedef struct {
 } proc_info_t;
 
 typedef struct {
-    u_int64_t time_stamp;
-    struct pktap_header *pktap_hdr;
+    u_int64_t flag;
     struct ip *ip_data;
     struct sockaddr *sin;
     proc_info_t *proc_info;
@@ -162,8 +139,6 @@ int divert_set_error_handler(divert_t *handle, divert_error_handler_t handler);
 
 int divert_set_filter(divert_t *handle, char *divert_filter, char *errmsg);
 
-int divert_set_pcap_filter(divert_t *divert_handle, char *pcap_filter, char *errmsg);
-
 /*
  * after divert_activate() is called, you should *NOT* do any time-consuming work
  * you *SHOULD* call divert_loop() as soon as possible
@@ -175,7 +150,7 @@ int divert_activate(divert_t *divert_handle, char *errmsg);
 void divert_loop(divert_t *divert_handle, int count);
 
 ssize_t divert_read(divert_t *handle,
-                    u_char *pktap_hdr,
+                    u_char *proc_info_buf,
                     u_char *ip_data,
                     u_char *sin);
 
@@ -201,8 +176,6 @@ ssize_t divert_reinject(divert_t *handle, struct ip *packet,
 int divert_is_looping(divert_t *handle);
 
 void divert_loop_stop(divert_t *handle);
-
-int divert_bpf_stats(divert_t *handle, struct pcap_stat *stats);
 
 /*
  * this function *SHOULD* be called within the thread you call divert_loop()

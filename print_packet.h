@@ -16,8 +16,6 @@
 
 void divert_print_packet(FILE *fp, u_int32_t flags,
                          packet_hdrs_t *packet_headers,
-                         struct pktap_header *pktap_hdr);
-
-void print_pktap_header(struct pktap_header *pktp_hdr);
+                         proc_info_t *proc_info);
 
 #endif //DIVERT_PACKET_HANDLER_H

@@ -16,7 +16,6 @@
  * The OpenBSD DLT_LOOP packet header is the same, except that the integer
  * is in network byte order.
  */
-#define	NULL_HDRLEN 4
 
 /*
  * Packet structure captured by BPF device
@@ -46,77 +45,11 @@
     .                           .
  */
 
-inline static int valid_ip_header(u_char *data) {
-    struct ip *ip_hdr = (struct ip *)data;
-    return (ip_hdr->ip_hl * 4u >= MIN_IP_HEADER_SIZE);
-}
-
-inline static ssize_t get_offset_by_dlt(int dlt) {
-    switch (dlt) {
-        case DLT_EN10MB:
-            return ETHER_HDR_LEN;
-        case DLT_NULL:
-        case DLT_LOOP:
-            return NULL_HDRLEN;
-        default:
-            return -1;
-    }
-}
-
 u_char *divert_dump_packet(u_char *packet, packet_hdrs_t *result,
                            u_int32_t flags, char *errmsg) {
     errmsg[0] = 0;
     memset(result, 0, sizeof(packet_hdrs_t));
     u_char *entry = packet;
-
-    if (flags & DIVERT_DUMP_BPF_HERDER) {
-        // extract the BPF header
-        struct bpf_hdr_ext *bhephdr = (struct bpf_hdr_ext *)entry;
-        if (bhephdr->bh_hdrlen < sizeof(struct bpf_hdr_ext)) {
-            sprintf(errmsg, "Invalid BPF header length: %hu bytes", bhephdr->bh_hdrlen);
-            memset(result, 0, sizeof(packet_hdrs_t));
-            return NULL;
-        }
-        result->bhep_hdr = bhephdr;
-        entry += bhephdr->bh_hdrlen;
-    }
-
-    if (flags & DIVERT_DUMP_PKTAP_HERDER) {
-        // extract the PKTAP header
-        struct pktap_header *pktap_hdr = (struct pktap_header *)entry;
-        if (pktap_hdr->pth_length < sizeof(struct pktap_header)) {
-            sprintf(errmsg, "Invalid PKTAP header length: %u bytes", pktap_hdr->pth_length);
-            memset(result, 0, sizeof(packet_hdrs_t));
-            return NULL;
-        }
-        result->pktap_hdr = pktap_hdr;
-        entry += pktap_hdr->pth_length;
-    }
-
-    if (flags & DIVERT_DUMP_ETHER_HERDER) {
-        struct ether_header *ether_hdr = (struct ether_header *)(entry);
-        if (result->pktap_hdr != NULL) {
-            ssize_t offset = get_offset_by_dlt(result->pktap_hdr->pth_dlt);
-            if (offset != -1) {
-                entry += offset;
-            } else {
-                sprintf(errmsg, "Invalid datalink type.");
-                memset(result, 0, sizeof(packet_hdrs_t));
-                return NULL;
-            }
-        } else {
-            if (valid_ip_header(entry + ETHER_HDR_LEN)) {
-                entry += ETHER_HDR_LEN;
-            } else if (valid_ip_header(entry + NULL_HDRLEN)) {
-                entry += NULL_HDRLEN;
-            } else {
-                sprintf(errmsg, "Invalid IP header, unknown reason");
-                memset(result, 0, sizeof(packet_hdrs_t));
-                return NULL;
-            }
-        }
-        result->ether_hdr = ether_hdr;
-    }
 
     if (flags & DIVERT_DUMP_IP_HEADER) {
         struct ip *ip_hdr = (struct ip *)entry;          /* define/compute ip header offset */

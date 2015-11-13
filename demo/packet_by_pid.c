@@ -13,12 +13,6 @@ u_char proc_info_buf[2 * sizeof(proc_info_t)];
 
 
 void error_handler(u_int64_t flags) {
-    if (flags & DIVERT_ERROR_BPF_INVALID) {
-        puts("Invalid BPF packet.");
-    }
-    if (flags & DIVERT_ERROR_BPF_NODATA) {
-        puts("Didn't read data from BPF device.");
-    }
     if (flags & DIVERT_ERROR_DIVERT_NODATA) {
         puts("Didn't read data from divert socket or data error.");
     }
@@ -43,7 +37,7 @@ int main(int argc, char *argv[]) {
     printf("Watching packets of %s: %d\n", proc_name_buf, pid);
 
     // buffer for error information
-    char errmsg[PCAP_ERRBUF_SIZE];
+    char errmsg[DIVERT_ERRBUF_SIZE];
 
     // pointer to buffer of pktap header
     proc_info_t *proc = (proc_info_t *)proc_info_buf;

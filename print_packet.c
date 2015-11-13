@@ -5,27 +5,9 @@
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 
-
-void print_pktap_header(struct pktap_header *pktp_hdr) {
-    printf("pth_length %u (sizeof(struct pktap_header)  %lu)\n",
-           pktp_hdr->pth_length, sizeof(struct pktap_header));
-    printf("pth_type_next %u\n", pktp_hdr->pth_type_next);
-    printf("pth_dlt %u\n", pktp_hdr->pth_dlt);
-    printf("pth_ifname %s\n", pktp_hdr->pth_ifname);
-    printf("pth_flags 0x%x\n", pktp_hdr->pth_flags);
-    printf("pth_protocol_family %u\n", pktp_hdr->pth_protocol_family);
-    printf("pth_frame_pre_length %u\n", pktp_hdr->pth_frame_pre_length);
-    printf("pth_frame_post_length %u\n", pktp_hdr->pth_frame_post_length);
-    printf("pth_pid %d\n", pktp_hdr->pth_pid);
-    printf("pth_comm %s\n", pktp_hdr->pth_comm);
-    printf("pth_svc %u\n", pktp_hdr->pth_svc);
-    printf("pth_epid %d\n", pktp_hdr->pth_epid);
-    printf("pth_ecomm %s\n", pktp_hdr->pth_ecomm);
-}
-
 void divert_print_packet(FILE *fp, u_int32_t flags,
                          packet_hdrs_t *packet_headers,
-                         struct pktap_header *pktap_hdr) {
+                         proc_info_t *proc_info) {
     static u_int32_t count = 1;
     if (flags & PRINT_NEWLINE) {
         puts("");
@@ -33,13 +15,9 @@ void divert_print_packet(FILE *fp, u_int32_t flags,
     if (flags & PRINT_INDEX) {
         fprintf(fp, "Packet index %u:\n", count++);
     }
-    if ((flags & PRINT_PROC) && pktap_hdr != NULL) {
+    if ((flags & PRINT_PROC) && proc_info != NULL) {
         fprintf(fp, "\tProcess information: %s:%d\n",
-                pktap_hdr->pth_comm, pktap_hdr->pth_pid);
-    }
-    if ((flags & PRINT_DATA_LINK) && pktap_hdr != NULL) {
-        fprintf(fp, "\tData Link Type: %s, on %s\n",
-                pcap_datalink_val_to_name(pktap_hdr->pth_dlt), pktap_hdr->pth_ifname);
+                proc_info->comm, proc_info->pid);
     }
 
     /* print source and destination IP addresses */
