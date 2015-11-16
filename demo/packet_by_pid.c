@@ -39,9 +39,6 @@ int main(int argc, char *argv[]) {
     proc_name(pid, proc_name_buf, sizeof(proc_name_buf));
     printf("Watching packets of %s: %d\n", proc_name_buf, pid);
 
-    // buffer for error information
-    char errmsg[DIVERT_ERRBUF_SIZE];
-
     // pointer to buffer of pktap header
     proc_info_t *proc = (proc_info_t *)proc_info_buf;
     packet_hdrs_t packet_hdrs;
@@ -54,8 +51,8 @@ int main(int argc, char *argv[]) {
 
     // activate the divert handler
     divert_activate(handle);
-    if (errmsg[0]) {
-        puts(errmsg);
+    if (handle->errmsg[0]) {
+        puts(handle->errmsg);
         exit(EXIT_FAILURE);
     }
 
@@ -82,11 +79,11 @@ int main(int argc, char *argv[]) {
 
         // dump the data of IP packet
         divert_dump_packet(packet_buf, &packet_hdrs,
-                           DIVERT_DUMP_IP_HEADER, errmsg);
+                           DIVERT_DUMP_IP_HEADER, handle->errmsg);
 
         // output the error message
-        if (errmsg[0]) {
-            puts(errmsg);
+        if (handle->errmsg[0]) {
+            puts(handle->errmsg);
         }
 
         // get actual pid of this packet

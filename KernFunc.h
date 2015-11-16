@@ -9,7 +9,8 @@
 #define KernFunc_h
 
 #define IFACE_BUFFER_SIZE 16
-#define KEXT_CTL_NAME "org.baidu.PacketPID"
+#define KEXT_CTL_NAME       "org.baidu.PacketPID"
+#define KEXT_FILE_NAME      "PacketPID.kext"
 
 #ifndef SO_PROCINFO
 struct so_procinfo {

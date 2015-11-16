@@ -141,15 +141,16 @@ static int divert_init_kernel_ctl_iface(int *fd, char *errmsg) {
     int kext_fd = socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
     if (kext_fd < 0) {
         sprintf(errmsg, "Could not open kext socket: %s", strerror(errno));
-        return DIVERT_FAILURE;
+        return KEXT_FAILURE;
     }
 
     struct ctl_info info;
     memset(&info, 0, sizeof(info));
     strncpy(info.ctl_name, KEXT_CTL_NAME, sizeof(info.ctl_name));
     if (ioctl(kext_fd, CTLIOCGINFO, &info) != 0) {
-        sprintf(errmsg, "Could not get ID for kernel control: %s", strerror(errno));
-        return DIVERT_FAILURE;
+        sprintf(errmsg, "Could not get ID for kernel control: %s"
+                "\nCheck if kernel extension is loaded.", strerror(errno));
+        return KEXT_FAILURE;
     }
 
     struct sockaddr_ctl addr;
@@ -163,7 +164,7 @@ static int divert_init_kernel_ctl_iface(int *fd, char *errmsg) {
     int ret_val = connect(kext_fd, (struct sockaddr *)&addr, sizeof(addr));
     if (ret_val != 0) {
         sprintf(errmsg, "Could not connect to kernel control: %s", strerror(errno));
-        return DIVERT_FAILURE;
+        return KEXT_FAILURE;
     }
 
     *fd = kext_fd;
@@ -315,7 +316,8 @@ int divert_activate(divert_t *divert_handle) {
 
     // check if KEXT is loaded
     // and setup query file descriptor
-    if (divert_init_kernel_ctl_iface(&divert_handle->kext_fd, divert_handle->errmsg) != 0) {
+    if (divert_init_kernel_ctl_iface(&divert_handle->kext_fd,
+                                     divert_handle->errmsg) != 0) {
         return DIVERT_FAILURE;
     }
 

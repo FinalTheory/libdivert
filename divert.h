@@ -13,6 +13,7 @@ extern "C" {
 /*
  * flags for error handling
  */
+#define KEXT_FAILURE        -1
 #define DIVERT_FAILURE      -2
 #define IPFW_FAILURE        -3
 #define DIVERT_BUF_FAILURE  -4

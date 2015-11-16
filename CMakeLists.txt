@@ -6,8 +6,6 @@ add_subdirectory(libnids)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -fPIC")
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall --std=c++11 -fPIC")
-
 add_definitions(
         -DWITH_NIDS
         -DPRIVATE
@@ -27,12 +25,23 @@ set(LIB_SOURCE_FILES
         queue.c
         buffer.c
         dump_packet.c
-        ipfw_utils.c)
+        ipfw_utils.c
+        divert_kext.c)
+
+# these are used to link to apple frameworks
+find_library(CORE_SERV CoreServices)
+if (NOT CORE_SERV)
+    message(FATAL_ERROR "CoreServices not found")
+endif()
+
+find_library(IOKIT IOKit)
+if (NOT IOKIT)
+    message(FATAL_ERROR "IOKit not found")
+endif()
 
 add_library(divert SHARED ${LIB_SOURCE_FILES})
-target_link_libraries(divert nids pcap net)
+target_link_libraries(divert nids pcap net ${CORE_SERV} ${IOKIT})
 set_target_properties(divert PROPERTIES LINK_FLAGS -all_load SUFFIX ".so")
 
 # below executables are demos
-
 add_subdirectory(demo)
