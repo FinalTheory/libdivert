@@ -28,8 +28,11 @@
         icmptypes {type[,type]}...
  */
 
-int ipfw_compile_rule(struct ip_fw *new_rule, u_short divert_port,
-                      char *rule_content, char *errmsg);
+int ipfw_compile_rule(struct ip_fw *new_rule,
+                      u_short rule_id,
+                      u_short divert_port,
+                      char *rule_content,
+                      char *errmsg);
 
 void ipfw_print_rule(struct ip_fw *chain);
 

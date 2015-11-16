@@ -7,8 +7,7 @@
 #include <unistd.h>
 
 
-int ipfw_setup(char *rule, u_short port, char *errmsg) {
-    errmsg[0] = 0;
+int ipfw_setup(char *rule, u_short rule_id, u_short port, char *errmsg) {
     int ipfw_fd;
     struct ip_fw ipfw_rule;
     /* clear error message */
@@ -17,29 +16,30 @@ int ipfw_setup(char *rule, u_short port, char *errmsg) {
         /* fill in the rule first */
         bzero(&ipfw_rule, sizeof(struct ip_fw));
         ipfw_rule.version = IP_FW_CURRENT_API_VERSION;
-        ipfw_rule.fw_number = DEFAULT_IPFW_RULE_ID;
+        ipfw_rule.fw_number = rule_id;
         ipfw_rule.fw_dst.s_addr = 0u;
         ipfw_rule.fw_dmsk.s_addr = 0u;
         ipfw_rule.fw_flg = IP_FW_F_DIVERT | IP_FW_F_IN | IP_FW_F_OUT;
         ipfw_rule.fw_un.fu_divert_port = port;
         ipfw_rule.fw_nports = 0;
     } else {
-        if (ipfw_compile_rule(&ipfw_rule, port, rule, errmsg) != 0) {
-            return -1;
+        if (ipfw_compile_rule(&ipfw_rule, rule_id,
+                              port, rule, errmsg) != 0) {
+            return IPFW_FAILURE;
         };
     }
 
     /* open a socket */
     if ((ipfw_fd = socket(AF_INET, SOCK_RAW, IPPROTO_RAW)) == -1) {
         sprintf(errmsg, "Could not create a raw socket: %s", strerror(errno));
-        return -1;
+        return IPFW_FAILURE;
     }
 
     /* write a rule into it */
     if (setsockopt(ipfw_fd, IPPROTO_IP, IP_FW_ADD,
                    &ipfw_rule, sizeof(ipfw_rule)) != 0) {
         sprintf(errmsg, "Could not set rule: %s", strerror(errno));
-        return -1;
+        return IPFW_FAILURE;
     }
 
     /* then close socket */

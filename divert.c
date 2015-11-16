@@ -23,14 +23,13 @@
 
 extern pid_t tcp_stream_pid, tcp_stream_epid;
 
+static volatile int ipfw_rule_index = DEFAULT_IPFW_RULE_ID;
+
 /*
  * only constant and parameter variables could be assigned here
  * no dynamic memory allocation
- * this function could only be called once within a process
- * if called more than twice, it would return the first created handle
  */
-divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
-    errmsg[0] = 0;
+divert_t *divert_create(int port_number, u_int32_t flags) {
     divert_t *divert_handle;
     divert_handle = malloc(sizeof(divert_t));
 
@@ -39,8 +38,8 @@ divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg) {
 
     divert_handle->flags = flags;
     divert_handle->divert_port = port_number;
-
     divert_handle->thread_buffer_size = PACKET_BUFFER_SIZE;
+    divert_handle->ipfw_id = ipfw_rule_index++;
 
     return divert_handle;
 }
@@ -70,26 +69,22 @@ int divert_set_callback(divert_t *handle, divert_callback_t callback, void *args
     return 0;
 }
 
-int divert_set_filter(divert_t *handle, char *divert_filter, char *errmsg) {
-    size_t rule_len = strlen(divert_filter);
-    char *divert_filter_new = malloc(rule_len + 1);
-    strcpy(divert_filter_new, divert_filter);
-    // do not use the packet queue
-    // because the size may grow and not cleaned in time
-    if (ipfw_delete(DEFAULT_IPFW_RULE_ID, errmsg) != 0) {
-        return -1;
+int divert_update_ipfw(divert_t *handle, char *divert_filter) {
+    if (ipfw_delete(handle->ipfw_id, handle->errmsg) != 0) {
+        return IPFW_FAILURE;
     }
-    int ret_val = ipfw_setup(divert_filter_new,
-                             (u_short)handle->divert_port, errmsg);
-    free(divert_filter_new);
-    return ret_val;
+    return ipfw_setup(strdup(divert_filter),
+                      (u_short)handle->ipfw_id,
+                      (u_short)handle->divert_port,
+                      handle->errmsg);
 }
 
-static int divert_init_divert_socket(divert_t *divert_handle, char *errmsg) {
+static int divert_init_divert_socket(divert_t *divert_handle) {
+    divert_handle->errmsg[0] = 0;
 
     divert_handle->divert_fd = socket(PF_INET, SOCK_RAW, IPPROTO_DIVERT);
     if (divert_handle->divert_fd == -1) {
-        sprintf(errmsg, "Couldn't open a divert socket");
+        sprintf(divert_handle->errmsg, "Couldn't open a divert socket");
         return DIVERT_FAILURE;
     }
 
@@ -105,7 +100,7 @@ static int divert_init_divert_socket(divert_t *divert_handle, char *errmsg) {
     // bind divert socket to port
     if (bind(divert_handle->divert_fd, (struct sockaddr *)&divert_port_addr,
              sizeof(struct sockaddr_in)) != 0) {
-        sprintf(errmsg, "Couldn't bind divert socket "
+        sprintf(divert_handle->errmsg, "Couldn't bind divert socket "
                 "to port: %s", strerror(errno));
         return DIVERT_FAILURE;
     }
@@ -115,7 +110,7 @@ static int divert_init_divert_socket(divert_t *divert_handle, char *errmsg) {
     if (divert_handle->divert_port == 0) {
         if (getsockname(divert_handle->divert_fd,
                         (struct sockaddr *)&divert_port_addr, &sin_len) != 0) {
-            sprintf(errmsg, "Couldn't get the address of "
+            sprintf(divert_handle->errmsg, "Couldn't get the address of "
                     "the divert socket: %s", strerror(errno));
             return DIVERT_FAILURE;
         } else {
@@ -123,15 +118,11 @@ static int divert_init_divert_socket(divert_t *divert_handle, char *errmsg) {
         }
     }
 
-    // setup firewall to redirect all traffic to divert socket
-    if (ipfw_setup(NULL, (u_short)divert_handle->divert_port, errmsg) != 0) {
-        return FIREWALL_FAILURE;
-    }
-
     /* allocate thread buffer to store labeled packet */
     divert_handle->thread_buffer = malloc(sizeof(packet_buf_t));
     if (divert_buf_init(divert_handle->thread_buffer,
-                        divert_handle->thread_buffer_size, errmsg) != 0) {
+                        divert_handle->thread_buffer_size,
+                        divert_handle->errmsg) != 0) {
         return DIVERT_BUF_FAILURE;
     }
 
@@ -274,7 +265,7 @@ divert_find_tcp_stream(struct ip *ip_hdr) {
 
 #define TCPDUMP_MAGIC        0xa1b2c3d4
 
-int divert_init_pcap(FILE *fp, char *errmsg) {
+int divert_init_pcap(FILE *fp) {
     struct pcap_file_header hdr;
     hdr.magic = TCPDUMP_MAGIC;
     hdr.version_major = PCAP_VERSION_MAJOR;
@@ -284,13 +275,12 @@ int divert_init_pcap(FILE *fp, char *errmsg) {
     hdr.sigfigs = 0;
     hdr.linktype = DLT_EN10MB;
     if (fwrite((char *)&hdr, sizeof(hdr), 1, fp) != 1) {
-        sprintf(errmsg, "Could not create pcap header: %s", strerror(errno));
         return -1;
     }
     return 0;
 }
 
-int divert_dump_pcap(struct ip *packet, FILE *fp, char *errmsg) {
+int divert_dump_pcap(struct ip *packet, FILE *fp) {
     struct pcap_sf_pkthdr sf_hdr;
     struct timeval tv;
     struct timezone tz;
@@ -305,37 +295,34 @@ int divert_dump_pcap(struct ip *packet, FILE *fp, char *errmsg) {
     size_t ret_val;
     ret_val = fwrite(&sf_hdr, 1, sizeof(sf_hdr), fp);
     if (ret_val != sizeof(sf_hdr)) {
-        sprintf(errmsg, "Error on fwrite: %s", strerror(errno));
         return -1;
     }
     ret_val = fwrite(&ether_hdr, 1, sizeof(ether_hdr), fp);
     if (ret_val != sizeof(ether_hdr)) {
-        sprintf(errmsg, "Error on fwrite: %s", strerror(errno));
         return -1;
     }
     ret_val = fwrite(packet, 1, ip_len, fp);
     if (ret_val != ip_len) {
-        sprintf(errmsg, "Error on fwrite: %s", strerror(errno));
         return -1;
     }
     return 0;
 }
 
-int divert_activate(divert_t *divert_handle, char *errmsg) {
+int divert_activate(divert_t *divert_handle) {
     // clean error message
-    errmsg[0] = 0;
+    divert_handle->errmsg[0] = 0;
     int status = 0;
 
     // check if KEXT is loaded
     // and setup query file descriptor
-    if (divert_init_kernel_ctl_iface(&divert_handle->kext_fd, errmsg) != 0) {
+    if (divert_init_kernel_ctl_iface(&divert_handle->kext_fd, divert_handle->errmsg) != 0) {
         return DIVERT_FAILURE;
     }
 
     /*
      * then init divert socket
      */
-    status = divert_init_divert_socket(divert_handle, errmsg);
+    status = divert_init_divert_socket(divert_handle);
     if (status != 0) {
         return status;
     }
@@ -345,14 +332,14 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
         divert_handle->callback = NULL;
     } else {
         if (divert_handle->callback == NULL) {
-            sprintf(errmsg, "Error: callback function not set!");
+            sprintf(divert_handle->errmsg, "Error: callback function not set!");
             return CALLBACK_NOT_FOUND;
         }
     }
 
     if (pipe(divert_handle->pipe_fd) != 0 ||
         pipe(divert_handle->exit_fd) != 0) {
-        sprintf(errmsg, "Could not create pipe: %s", strerror(errno));
+        sprintf(divert_handle->errmsg, "Could not create pipe: %s", strerror(errno));
         return PIPE_OPEN_FAILURE;
     }
 
@@ -372,7 +359,7 @@ int divert_activate(divert_t *divert_handle, char *errmsg) {
     chksum_ctl->action = NIDS_DONT_CHKSUM;
     nids_register_chksum_ctl(chksum_ctl, 1);
     if (!nids_init()) {
-        strcpy(errmsg, nids_errbuf);
+        strcpy(divert_handle->errmsg, nids_errbuf);
         return NIDS_FAILURE;
     }
 
@@ -663,7 +650,18 @@ void *divert_non_block_thread(void *args) {
     return NULL;
 }
 
-void divert_loop(divert_t *divert_handle, int count) {
+int divert_loop(divert_t *divert_handle, int count) {
+    divert_handle->errmsg[0] = 0;
+
+    // setup firewall to redirect all traffic to divert socket
+    if (ipfw_setup(NULL,
+                   (u_short)divert_handle->ipfw_id,
+                   (u_short)divert_handle->divert_port,
+                   divert_handle->errmsg) != 0) {
+        // error message is set, just return is OK
+        return IPFW_FAILURE;
+    }
+
     divert_loop_func_t loop_function;
     if (divert_handle->flags & DIVERT_FLAG_FAST_EXIT) {
         loop_function = divert_loop_fast_exit;
@@ -679,11 +677,13 @@ void divert_loop(divert_t *divert_handle, int count) {
         args->divert_handle = divert_handle;
         args->loop_function = loop_function;
         pthread_t non_block_thread;
-        pthread_create(&non_block_thread, NULL, divert_non_block_thread, args);
+        pthread_create(&non_block_thread, NULL,
+                       divert_non_block_thread, args);
         pthread_detach(non_block_thread);
     } else {
         loop_function(divert_handle, count);
     }
+    return 0;
 }
 
 int divert_is_inbound(struct sockaddr *sin_raw, char *interface) {
@@ -763,15 +763,15 @@ int divert_is_looping(divert_t *handle) {
     return handle->is_looping;
 }
 
-
-
 static void *_divert_loop_stop_func(void *args) {
     char pipe_buf[] = "exit";
-    char errmsg[DIVERT_ERRBUF_SIZE];
     divert_t *handle = (divert_t *)args;
+    handle->errmsg[0] = 0;
 
     // set loop flag to zero
     handle->is_looping = 0;
+
+    // write message to PIPE to break loop
     if (DIVERT_FLAG_FAST_EXIT) {
         // write data into pipe to exit event loop
         write(handle->pipe_fd[1], pipe_buf, sizeof(pipe_buf));
@@ -783,7 +783,8 @@ static void *_divert_loop_stop_func(void *args) {
     assert(str_buf[0] == 's');
 
     // finally clean firewall rule
-    ipfw_flush(errmsg);
+    ipfw_delete(handle->ipfw_id, handle->errmsg);
+
     return NULL;
 }
 
@@ -795,14 +796,15 @@ void divert_loop_stop(divert_t *handle) {
     pthread_detach(non_block_thread);
 }
 
-int divert_close(divert_t *divert_handle, char *errmsg) {
-    errmsg[0] = 0;
+int divert_close(divert_t *divert_handle) {
+    divert_handle->errmsg[0] = 0;
 
     // close the divert socket and free the buffer
     close(divert_handle->divert_fd);
     if (divert_handle->divert_buffer != NULL) {
         free(divert_handle->divert_buffer);
-        divert_buf_clean(divert_handle->thread_buffer, errmsg);
+        divert_buf_clean(divert_handle->thread_buffer,
+                         divert_handle->errmsg);
     }
 
     // close the kext communication describpor
@@ -813,8 +815,7 @@ int divert_close(divert_t *divert_handle, char *errmsg) {
     close(divert_handle->exit_fd[0]);
     close(divert_handle->exit_fd[1]);
 
-    memset(divert_handle, 0, sizeof(divert_t));
-
+    free(divert_handle);
     return 0;
 }
 

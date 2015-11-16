@@ -1,6 +1,10 @@
 #ifndef LIBDIVERT_DIVERT_H
 #define LIBDIVERT_DIVERT_H
 
+#ifdef  __cplusplus
+extern "C" {
+#endif
+
 #include "buffer.h"
 #include <stdio.h>
 #include <netinet/ip.h>
@@ -10,7 +14,7 @@
  * flags for error handling
  */
 #define DIVERT_FAILURE      -2
-#define FIREWALL_FAILURE    -3
+#define IPFW_FAILURE        -3
 #define DIVERT_BUF_FAILURE  -4
 #define CALLBACK_NOT_FOUND  -5
 #define PIPE_OPEN_FAILURE   -6
@@ -69,6 +73,7 @@ typedef struct {
      */
     int divert_fd;                  // file descriptor of divert socket
     int kext_fd;                    // file descriptor for kernel-to-userland communication
+    int ipfw_id;                    // ID for ipfw rule
     int divert_port;                // port bind to divert socket
     int pipe_fd[2];                 // use pipe descriptor to end event loop gracefully
     int exit_fd[2];                 // use pipe descriptor to wait event loop gracefully
@@ -99,6 +104,8 @@ typedef struct {
     void *callback_args;
     volatile u_char is_looping;
 
+    // store error code and message
+    char errmsg[DIVERT_ERRBUF_SIZE];
 } divert_t;
 
 typedef struct {
@@ -127,7 +134,7 @@ typedef struct {
     proc_info_t *proc_info;
 } packet_info_t;
 
-divert_t *divert_create(int port_number, u_int32_t flags, char *errmsg);
+divert_t *divert_create(int port_number, u_int32_t flags);
 
 int divert_set_data_buffer_size(divert_t *handle, size_t bufsize);
 
@@ -137,7 +144,7 @@ int divert_set_callback(divert_t *handle, divert_callback_t callback, void *args
 
 int divert_set_error_handler(divert_t *handle, divert_error_handler_t handler);
 
-int divert_set_filter(divert_t *handle, char *divert_filter, char *errmsg);
+int divert_update_ipfw(divert_t *handle, char *divert_filter);
 
 /*
  * after divert_activate() is called, you should *NOT* do any time-consuming work
@@ -145,9 +152,9 @@ int divert_set_filter(divert_t *handle, char *divert_filter, char *errmsg);
  * otherwise the diverted packets couldn't be handled in time
  * and this would make your network connection unstable
  */
-int divert_activate(divert_t *divert_handle, char *errmsg);
+int divert_activate(divert_t *divert_handle);
 
-void divert_loop(divert_t *divert_handle, int count);
+int divert_loop(divert_t *divert_handle, int count);
 
 ssize_t divert_read(divert_t *handle,
                     u_char *proc_info_buf,
@@ -162,9 +169,9 @@ int divert_query_proc_by_packet(divert_t *handle,
 struct tcp_stream *
         divert_find_tcp_stream(struct ip *ip_hdr);
 
-int divert_init_pcap(FILE *fp, char *errmsg);
+int divert_init_pcap(FILE *fp);
 
-int divert_dump_pcap(struct ip *packet, FILE *fp, char *errmsg);
+int divert_dump_pcap(struct ip *packet, FILE *fp);
 
 int divert_is_inbound(struct sockaddr *sin_raw, char *interface);
 
@@ -181,11 +188,15 @@ void divert_loop_stop(divert_t *handle);
  * this function *SHOULD* be called within the thread you call divert_loop()
  * but *NOT* in the thread you call divert_loop_stop() !
  */
-int divert_close(divert_t *divert_handle, char *errmsg);
+int divert_close(divert_t *divert_handle);
 
 int divert_set_signal_handler(int signum,
                               divert_signal_t handler, void *data);
 
 void divert_signal_handler_stop_loop(int signal, void *handle);
+
+#ifdef  __cplusplus
+}
+#endif
 
 #endif //LIBDIVERT_DIVERT_H

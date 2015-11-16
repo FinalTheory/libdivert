@@ -14,6 +14,9 @@ void error_handler(u_int64_t flags) {
     if (flags & DIVERT_ERROR_KQUEUE) {
         puts("kqueue error.");
     }
+    if (flags & DIVERT_ERROR_INVALID_IP) {
+        puts("Invalid IP packet.");
+    }
 }
 
 packet_buf_t *thread_buffer;
@@ -77,13 +80,11 @@ int main(int argc, char *argv[]) {
         delay = (useconds_t)atoi(argv[1]);
     }
 
-    // buffer for error information
-    char errmsg[DIVERT_ERRBUF_SIZE];
     void *ret;
 
     // create a handle for divert object
     // not using any flag, just divert all packets
-    divert_t *handle = divert_create(0, 0, errmsg);
+    divert_t *handle = divert_create(0, 0);
 
     // set the callback function to handle packets
     divert_set_callback(handle, callback, handle);
@@ -92,15 +93,15 @@ int main(int argc, char *argv[]) {
     divert_set_error_handler(handle, error_handler);
 
     // activate the divert handler
-    divert_activate(handle, errmsg);
-    if (errmsg[0]) {
-        puts(errmsg);
+    divert_activate(handle);
+    if (handle->errmsg[0]) {
+        puts(handle->errmsg);
         exit(EXIT_FAILURE);
     }
 
     // allocate buffer for threads
     thread_buffer = malloc(sizeof(packet_buf_t));
-    divert_buf_init(thread_buffer, 4096, errmsg);
+    divert_buf_init(thread_buffer, 4096, handle->errmsg);
 
     // create a new thread to handle the ICMP packets
     pthread_t reinject_thread;
@@ -124,9 +125,9 @@ int main(int argc, char *argv[]) {
     printf("Diverted %d ICMP packets.\n", *(int *)ret);
 
     // clean the handle to release resources
-    if (divert_close(handle, errmsg) == 0) {
+    if (divert_close(handle) == 0) {
         puts("Successfully cleaned, exit.");
     }
-    divert_buf_clean(thread_buffer, errmsg);
+    divert_buf_clean(thread_buffer, handle->errmsg);
     return 0;
 }

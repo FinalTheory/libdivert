@@ -19,6 +19,9 @@ void error_handler(u_int64_t flags) {
     if (flags & DIVERT_ERROR_KQUEUE) {
         puts("kqueue error.");
     }
+    if (flags & DIVERT_ERROR_INVALID_IP) {
+        puts("Invalid IP packet.");
+    }
 }
 
 
@@ -44,13 +47,13 @@ int main(int argc, char *argv[]) {
     packet_hdrs_t packet_hdrs;
 
     // create a handle for divert object
-    divert_t *handle = divert_create(0, DIVERT_FLAG_BLOCK_IO, errmsg);
+    divert_t *handle = divert_create(0, DIVERT_FLAG_BLOCK_IO);
 
     // set the error handler to display error information
     divert_set_error_handler(handle, error_handler);
 
     // activate the divert handler
-    divert_activate(handle, errmsg);
+    divert_activate(handle);
     if (errmsg[0]) {
         puts(errmsg);
         exit(EXIT_FAILURE);
@@ -59,7 +62,7 @@ int main(int argc, char *argv[]) {
     // register signal handler to exit process gracefully
     divert_set_signal_handler(SIGINT, divert_signal_handler_stop_loop, (void *)handle);
 
-    divert_set_filter(handle, "ip from any to not 0.0.0.255:24 via en0", errmsg);
+    divert_update_ipfw(handle, "ip from any to not 0.0.0.255:24 via en0");
 
     // call the non-blocking main loop
     divert_loop(handle, -1);
@@ -95,7 +98,7 @@ int main(int argc, char *argv[]) {
     }
 
     // clean the handle to release resources
-    if (divert_close(handle, errmsg) == 0) {
+    if (divert_close(handle) == 0) {
         puts("Successfully cleaned.");
     }
 

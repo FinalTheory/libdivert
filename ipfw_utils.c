@@ -783,8 +783,11 @@ static void fill_iface(char *which, union ip_fw_if *ifu,
  * start from:
  * (divert 1234) ip from any to any
  */
-int ipfw_compile_rule(struct ip_fw *new_rule, u_short divert_port,
-                      char *rule_content, char *errmsg) {
+int ipfw_compile_rule(struct ip_fw *new_rule,
+                      u_short rule_id,
+                      u_short divert_port,
+                      char *rule_content,
+                      char *errmsg) {
     /* first extract rules from string */
     char *tokens[MAX_TOKS];
     int ac = 0;
@@ -810,7 +813,7 @@ int ipfw_compile_rule(struct ip_fw *new_rule, u_short divert_port,
     rule.version = IP_FW_CURRENT_API_VERSION;
 
     /* rule number */
-    rule.fw_number = DEFAULT_IPFW_RULE_ID;
+    rule.fw_number = rule_id;
 
     /* Action is set to divert */
     rule.fw_flg |= IP_FW_F_DIVERT;

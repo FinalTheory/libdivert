@@ -17,6 +17,9 @@ void error_handler(u_int64_t flags) {
     if (flags & DIVERT_ERROR_KQUEUE) {
         puts("kqueue error.");
     }
+    if (flags & DIVERT_ERROR_INVALID_IP) {
+        puts("Invalid IP packet.");
+    }
 }
 
 #define int_ntoa(x)    inet_ntoa(*((struct in_addr *)&x))
@@ -94,27 +97,17 @@ int main(int argc, char *argv[]) {
     proc_name(pid, proc_name_buf, sizeof(proc_name_buf));
     printf("Watching packets of %s: %d\n", proc_name_buf, pid);
 
-    // buffer for error information
-    char errmsg[DIVERT_ERRBUF_SIZE];
-
     // create a handle for divert object
     handle = divert_create(0, DIVERT_FLAG_BLOCK_IO |
-                              DIVERT_FLAG_TCP_REASSEM, errmsg);
-
-    FILE *fp1 = fopen("data.pcap", "w");
-    FILE *fp2 = fopen("data_all.pcap", "w");
-    FILE *fp3 = fopen("data_unknown.pcap", "w");
-    divert_init_pcap(fp1, errmsg);
-    divert_init_pcap(fp2, errmsg);
-    divert_init_pcap(fp3, errmsg);
+                              DIVERT_FLAG_TCP_REASSEM);
 
     // set the error handler to display error information
     divert_set_error_handler(handle, error_handler);
 
     // activate the divert handler
-    divert_activate(handle, errmsg);
-    if (errmsg[0]) {
-        puts(errmsg);
+    divert_activate(handle);
+    if (handle->errmsg[0]) {
+        puts(handle->errmsg);
         exit(EXIT_FAILURE);
     }
 
@@ -126,6 +119,7 @@ int main(int argc, char *argv[]) {
     // call the non-blocking main loop
     divert_loop(handle, -1);
 
+    // register callback function
     nids_register_tcp(tcp_callback);
 
     while (divert_is_looping(handle)) {
@@ -133,29 +127,14 @@ int main(int argc, char *argv[]) {
         divert_read(handle, proc_info_buf,
                     packet_buf, sin_buf);
 
-        pid_t cur_pid = ((proc_info_t *)proc_info_buf)->pid == -1 ?
-                        ((proc_info_t *)proc_info_buf)->epid :
-                        ((proc_info_t *)proc_info_buf)->pid;
-        if (cur_pid == pid) {
-            divert_dump_pcap((struct ip *)packet_buf, fp1, errmsg);
-            divert_dump_pcap((struct ip *)packet_buf, fp2, errmsg);
-        } else if (cur_pid == -1) {
-            divert_dump_pcap((struct ip *)packet_buf, fp2, errmsg);
-            divert_dump_pcap((struct ip *)packet_buf, fp3, errmsg);
-        }
-
         // re-inject packets into TCP/IP stack
         divert_reinject(handle, (struct ip *)packet_buf,
                         -1, (struct sockaddr *)sin_buf);
     }
 
     // clean the handle to release resources
-    if (divert_close(handle, errmsg) == 0) {
+    if (divert_close(handle) == 0) {
         puts("Successfully cleaned.");
     }
-    fclose(fp1);
-    fclose(fp2);
-    fclose(fp3);
-
     return 0;
 }

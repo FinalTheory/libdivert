@@ -2,6 +2,7 @@
 #include "nids.h"
 #include <stdlib.h>
 #include <dump_packet.h>
+#include <divert.h>
 #include "libproc.h"
 
 // PID of process
@@ -55,20 +56,14 @@ int main(int argc, char *argv[]) {
     proc_name(pid, proc_name_buf, sizeof(proc_name_buf));
     printf("Watching packets of %s: %d\n", proc_name_buf, pid);
 
-    // statistics
-    int diverted = 0, missed = 0;
-
-    // buffer for error information
-    char errmsg[DIVERT_ERRBUF_SIZE];
-
     // create a handle for divert object
     handle = divert_create(0, DIVERT_FLAG_BLOCK_IO |
-                              DIVERT_FLAG_TCP_REASSEM, errmsg);
+                              DIVERT_FLAG_TCP_REASSEM);
 
     // activate the divert handler
-    divert_activate(handle, errmsg);
-    if (errmsg[0]) {
-        puts(errmsg);
+    divert_activate(handle);
+    if (handle->errmsg[0]) {
+        puts(handle->errmsg);
         exit(EXIT_FAILURE);
     }
 
@@ -89,14 +84,11 @@ int main(int argc, char *argv[]) {
         divert_read(handle, proc_info_buf,
                     packet_buf, sin_buf);
 
-        diverted++;
-        if (proc->pid == -1 && proc->epid == -1) {
-            missed++;
-        } else if (proc->pid == pid) {
+        if (proc->pid == pid) {
             packet_hdrs_t headers;
             divert_dump_packet(packet_buf, &headers,
-                               DIVERT_DUMP_IP_HEADER, errmsg);
-
+                               DIVERT_DUMP_IP_HEADER,
+                               handle->errmsg);
             if (headers.tcp_hdr != NULL) {
                 if (headers.tcp_hdr->th_flags & TH_RST) {
                     puts("Found TCP RST packet!");
@@ -109,10 +101,12 @@ int main(int argc, char *argv[]) {
                         -1, (struct sockaddr *)sin_buf);
     }
 
-    printf("Process information accuracy: %f\n", (diverted - missed) / (double)diverted);
+    printf("Process information accuracy: %f\n",
+           (handle->num_diverted - handle->num_unknown) /
+           (double)handle->num_diverted);
 
     // clean the handle to release resources
-    if (divert_close(handle, errmsg) == 0) {
+    if (divert_close(handle) == 0) {
         puts("Successfully cleaned.");
     }
 

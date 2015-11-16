@@ -11,6 +11,9 @@ void error_handler(u_int64_t flags) {
     if (flags & DIVERT_ERROR_KQUEUE) {
         puts("kqueue error.");
     }
+    if (flags & DIVERT_ERROR_INVALID_IP) {
+        puts("Invalid IP packet.");
+    }
 }
 
 inline double rand_double() {
@@ -28,7 +31,6 @@ const size_t size_MB = 1024 * 1024;
 struct in_addr localhost;
 
 void callback(void *args, void *proc_info_p, struct ip *packet, struct sockaddr *sin) {
-    char errmsg[256];
     proc_info_t *proc = proc_info_p;
     divert_t *handle = (divert_t *)args;
 
@@ -37,11 +39,11 @@ void callback(void *args, void *proc_info_p, struct ip *packet, struct sockaddr 
         if (divert_is_inbound(sin, NULL)) {
             if (rand_double() < 1 - rate) {
                 divert_reinject(handle, packet, -1, sin);
-                divert_dump_pcap(packet, fp1, errmsg);
+                divert_dump_pcap(packet, fp1);
             }
         } else {
             divert_reinject(handle, packet, -1, sin);
-            divert_dump_pcap(packet, fp1, errmsg);
+            divert_dump_pcap(packet, fp1);
         }
     } else {
         divert_reinject(handle, packet, -1, sin);
@@ -51,10 +53,10 @@ void callback(void *args, void *proc_info_p, struct ip *packet, struct sockaddr 
     if (packet->ip_src.s_addr != localhost.s_addr &&
         packet->ip_dst.s_addr != localhost.s_addr) {
         if (cur_pid == -1) {
-            divert_dump_pcap(packet, fp2, errmsg);
+            divert_dump_pcap(packet, fp2);
         }
         if (cur_pid == -1 || pid == cur_pid) {
-            divert_dump_pcap(packet, fp3, errmsg);
+            divert_dump_pcap(packet, fp3);
             total_size += ntohs(packet->ip_len);
             if (total_size / size_MB != prev_MB) {
                 prev_MB = total_size / size_MB;
@@ -91,13 +93,13 @@ int main(int argc, char *argv[]) {
     fp1 = fopen("data.pcap", "w");
     fp2 = fopen("data_unknown.pcap", "w");
     fp3 = fopen("data_all.pcap", "w");
-    divert_init_pcap(fp1, errmsg);
-    divert_init_pcap(fp2, errmsg);
-    divert_init_pcap(fp3, errmsg);
+    divert_init_pcap(fp1);
+    divert_init_pcap(fp2);
+    divert_init_pcap(fp3);
 
     // create a handle for divert object
     // not using any flag, just divert all packets
-    divert_t *handle = divert_create(0, 0u, errmsg);
+    divert_t *handle = divert_create(0, 0u);
 
     // set the callback function to handle packets
     divert_set_callback(handle, callback, handle);
@@ -106,9 +108,9 @@ int main(int argc, char *argv[]) {
     divert_set_error_handler(handle, error_handler);
 
     // activate the divert handler
-    divert_activate(handle, errmsg);
+    divert_activate(handle);
 
-    divert_set_filter(handle, "ip from any to not 0.0.0.255:24 via en0", errmsg);
+    divert_update_ipfw(handle, "ip from any to not 0.0.0.255:24 via en0");
 
     if (errmsg[0]) {
         puts(errmsg);
@@ -127,7 +129,7 @@ int main(int argc, char *argv[]) {
     printf("Diverted packets: %llu\n", handle->num_diverted);
 
     // clean the handle to release resources
-    if (divert_close(handle, errmsg) == 0) {
+    if (divert_close(handle) == 0) {
         puts("Successfully cleaned, exit.");
     }
     fclose(fp1);
