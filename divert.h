@@ -54,7 +54,7 @@ extern "C" {
 #define DIVERT_ERROR_DIVERT_NODATA  (1u << 1)
 #define DIVERT_STOP_LOOP            (1u << 2)
 #define DIVERT_ERROR_KQUEUE         (1u << 3)
-#define DIVERT_ERROR_INVALID_IP     (1u << 3)
+#define DIVERT_ERROR_INVALID_IP     (1u << 4)
 
 // typedef for divert callback function
 typedef void (*divert_callback_t)(void *args, void *pktap_hdr,

@@ -70,9 +70,8 @@ int divert_set_callback(divert_t *handle, divert_callback_t callback, void *args
 }
 
 int divert_update_ipfw(divert_t *handle, char *divert_filter) {
-    if (ipfw_delete(handle->ipfw_id, handle->errmsg) != 0) {
-        return IPFW_FAILURE;
-    }
+    // do not care if it fails
+    ipfw_delete(handle->ipfw_id, handle->errmsg);
     return ipfw_setup(strdup(divert_filter),
                       (u_short)handle->ipfw_id,
                       (u_short)handle->divert_port,
@@ -515,6 +514,10 @@ static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
 
     char exit_str[] = "success";
     write(divert_handle->exit_fd[1], exit_str, sizeof(exit_str));
+    // call divert_loop_stop() to clear ipfw rule
+    if (count > 0) {
+        divert_loop_stop(divert_handle);
+    }
 }
 
 static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
@@ -635,6 +638,10 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
 
     char exit_str[] = "success";
     write(divert_handle->exit_fd[1], exit_str, sizeof(exit_str));
+    // call divert_loop_stop() to clear ipfw rule
+    if (count > 0) {
+        divert_loop_stop(divert_handle);
+    }
 }
 
 typedef void (*divert_loop_func_t)(divert_t *, int);
@@ -794,7 +801,8 @@ void divert_loop_stop(divert_t *handle) {
     // the signal interrupts execution of main thread
     // so we need to start a new thread to to this
     pthread_t non_block_thread;
-    pthread_create(&non_block_thread, NULL, _divert_loop_stop_func, handle);
+    pthread_create(&non_block_thread, NULL,
+                   _divert_loop_stop_func, handle);
     pthread_detach(non_block_thread);
 }
 
