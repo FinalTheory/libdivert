@@ -66,8 +66,10 @@ int main(int argc, char *argv[]) {
 
     while (divert_is_looping(handle)) {
         // read data from the divert handle
-        ssize_t status = divert_read(handle, proc_info_buf,
-                                     packet_buf, sin_buf);
+        ssize_t status = divert_read(handle,
+                                     (proc_info_t *)proc_info_buf,
+                                     (struct ip *)packet_buf,
+                                     (struct sockaddr_in *)sin_buf);
 
         // the handle is closed, then just break the loop
         if (status == DIVERT_READ_EOF) {

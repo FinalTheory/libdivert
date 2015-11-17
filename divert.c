@@ -706,9 +706,9 @@ int divert_is_outbound(struct sockaddr *sin_raw) {
 }
 
 ssize_t divert_read(divert_t *handle,
-                    u_char *proc_info_buf,
-                    u_char *ip_data,
-                    u_char *sin) {
+                    proc_info_t *proc_info_buf,
+                    struct ip *ip_data,
+                    struct sockaddr_in *sin) {
     int ret_val = 0;
     // make it non-blocking if event loop is stopped
     if (!handle->is_looping ||

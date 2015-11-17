@@ -158,9 +158,9 @@ int divert_activate(divert_t *divert_handle);
 int divert_loop(divert_t *divert_handle, int count);
 
 ssize_t divert_read(divert_t *handle,
-                    u_char *proc_info_buf,
-                    u_char *ip_data,
-                    u_char *sin);
+                    proc_info_t *proc_info_buf,
+                    struct ip *ip_data,
+                    struct sockaddr_in *sin);
 
 int divert_query_proc_by_packet(divert_t *handle,
                                 struct ip *ip_hdr,
