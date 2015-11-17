@@ -80,8 +80,9 @@ int main(int argc, char *argv[]) {
         divert_reinject(handle, (struct ip *)packet_buf, -1, (struct sockaddr *)sin_buf);
 
         // dump the data of IP packet
-        divert_dump_packet(packet_buf, &packet_hdrs,
-                           DIVERT_DUMP_IP_HEADER, handle->errmsg);
+        divert_dump_packet(packet_buf,
+                           &packet_hdrs,
+                           handle->errmsg);
 
         // output the error message
         if (handle->errmsg[0]) {

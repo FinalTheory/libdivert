@@ -464,7 +464,7 @@ static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
         if (num_divert > 0) {
             // extract the headers of current packet
             divert_dump_packet(divert_handle->divert_buffer,
-                               &packet_hdrs, DIVERT_DUMP_IP_HEADER, errmsg);
+                               &packet_hdrs, errmsg);
             if (packet_hdrs.size_ip) {
                 // if packet is not found in the queue, then just send it to user
                 size_t ip_length = ntohs(packet_hdrs.ip_hdr->ip_len);
@@ -574,7 +574,7 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
                     if (num_divert > 0) {
                         // extract the headers of current packet
                         divert_dump_packet(divert_handle->divert_buffer,
-                                           &packet_hdrs, DIVERT_DUMP_IP_HEADER, errmsg);
+                                           &packet_hdrs, errmsg);
                         if (packet_hdrs.size_ip) {
                             // if packet is not found in the queue, then just send it to user
                             size_t ip_length = ntohs(packet_hdrs.ip_hdr->ip_len);

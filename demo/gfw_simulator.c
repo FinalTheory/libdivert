@@ -88,8 +88,8 @@ int main(int argc, char *argv[]) {
 
         if (proc->pid == pid) {
             packet_hdrs_t headers;
-            divert_dump_packet(packet_buf, &headers,
-                               DIVERT_DUMP_IP_HEADER,
+            divert_dump_packet(packet_buf,
+                               &headers,
                                handle->errmsg);
             if (headers.tcp_hdr != NULL) {
                 if (headers.tcp_hdr->th_flags & TH_RST) {
