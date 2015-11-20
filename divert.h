@@ -57,7 +57,7 @@ extern "C" {
 #define DIVERT_ERROR_INVALID_IP     (1u << 4)
 
 // typedef for divert callback function
-typedef void (*divert_callback_t)(void *args, void *pktap_hdr,
+typedef void (*divert_callback_t)(void *args, void *proc_info,
                                   struct ip *ip_data, struct sockaddr *sin);
 
 // typedef for divert error handler function

@@ -26,7 +26,9 @@ set(LIB_SOURCE_FILES
         buffer.c
         dump_packet.c
         ipfw_utils.c
-        divert_kext.c)
+        divert_kext.c
+        emulator/emulator_callback.c
+        emulator/emulator_config.c)
 
 # these are used to link to apple frameworks
 find_library(CORE_SERV CoreServices)
