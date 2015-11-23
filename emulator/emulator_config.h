@@ -3,11 +3,12 @@
 
 #include "divert.h"
 #include "queue.h"
+#include "pqueue.h"
 #include <ctype.h>
 #include <unistd.h>
 #include <sys/time.h>
 
-#define EMULATOR_BY_PID     (1u)
+#define EMULATOE_IS_RUNNING (1u)
 #define EMULATOR_DROP       (1u << 1)
 #define EMULATOR_DELAY      (1u << 2)
 #define EMULATOR_THROTTLE   (1u << 3)
@@ -16,10 +17,22 @@
 #define EMULATOR_DUPLICATE  (1u << 6)
 
 #define PACKET_SIZE_LEVELS  10
+// size of packet buffer
+#define DISORDER_BUF_SIZE   1024
+#define DELAY_BUF_SIZE      1024
+// latency for at most 10 packets
+#define MAX_DISORDER_NUM    10
+// max number of duplicate packet
+#define MAX_DUPLICATE_NUM   4
+// max tamper bytes
+#define MAX_TAMPER_BYTES    4
+// control the tamper rate
+#define TAMPER_CONTROL      4
 
 typedef struct {
     divert_t *handle;
-    __uint64_t flags;
+    uint64_t flags;
+    uint64_t counter;
 
     ssize_t num_pid;
     pid_t *pid_list;
@@ -75,7 +88,33 @@ typedef struct {
 
     size_t packet_size[PACKET_SIZE_LEVELS];
     float packet_rate[PACKET_SIZE_LEVELS];
+
+    PQueue *delay_queue;
+    PQueue *disorder_queue;
 } emulator_config_t;
+
+typedef struct {
+    struct ip *packet;
+    struct sockaddr *sin;
+    uint64_t time_send;
+} disorder_packet_t;
+
+
+typedef struct {
+    struct ip *packet;
+    struct sockaddr *sin;
+    struct timeval time_send;
+} delay_packet_t;
+
+
+#define CHECK_AND_FREE(VAR)     \
+    if ((VAR) != NULL) {        \
+        free((VAR));            \
+    }
+
+#define MALLOC_AND_COPY(DST, SRC, NUM, TYPE)     \
+    (DST) = malloc(sizeof(TYPE) * (NUM));      \
+    memcpy((DST), (SRC), sizeof(TYPE) * (NUM));
 
 
 #endif //DIVERT_EMULATOR_CONFIG_H

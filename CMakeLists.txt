@@ -28,7 +28,8 @@ set(LIB_SOURCE_FILES
         ipfw_utils.c
         divert_kext.c
         emulator/emulator_callback.c
-        emulator/emulator_config.c)
+        emulator/emulator_config.c
+        emulator/pqueue.c)
 
 # these are used to link to apple frameworks
 find_library(CORE_SERV CoreServices)
