@@ -128,6 +128,6 @@ int main(int argc, char *argv[]) {
     if (divert_close(handle) == 0) {
         puts("Successfully cleaned, exit.");
     }
-    divert_buf_clean(thread_buffer, handle->errmsg);
+    divert_buf_clean(thread_buffer);
     return 0;
 }

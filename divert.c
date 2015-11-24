@@ -50,12 +50,8 @@ int divert_set_data_buffer_size(divert_t *handle, size_t bufsize) {
 }
 
 int divert_set_thread_buffer_size(divert_t *handle, size_t bufsize) {
-    if (bufsize < SEM_VALUE_MAX) {
-        handle->thread_buffer_size = bufsize;
-        return 0;
-    } else {
-        return -1;
-    }
+    handle->thread_buffer_size = bufsize;
+    return 0;
 }
 
 int divert_set_error_handler(divert_t *handle, divert_error_handler_t handler) {
@@ -813,8 +809,7 @@ int divert_close(divert_t *divert_handle) {
     close(divert_handle->divert_fd);
     if (divert_handle->divert_buffer != NULL) {
         free(divert_handle->divert_buffer);
-        divert_buf_clean(divert_handle->thread_buffer,
-                         divert_handle->errmsg);
+        divert_buf_clean(divert_handle->thread_buffer);
     }
 
     // close the kext communication describpor
