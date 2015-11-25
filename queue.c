@@ -57,6 +57,14 @@ queue_node_t *queue_pop(queue_t *queue) {
     return result;
 }
 
+queue_node_t *queue_head(queue_t *queue) {
+    if (queue == NULL) {
+        return NULL;
+    } else {
+        return queue->head;
+    }
+}
+
 static inline void queue_delete_node(queue_t *queue,
                                      queue_node_t *prev,
                                      queue_node_t *next) {

@@ -30,6 +30,8 @@ typedef struct {
 
 queue_t *queue_create(queue_free_function_t free_func);
 
+queue_node_t *queue_head(queue_t *queue);
+
 queue_node_t *queue_push(queue_t *queue, void *data);
 
 queue_node_t *queue_pop(queue_t *queue);

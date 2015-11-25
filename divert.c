@@ -367,9 +367,7 @@ int divert_activate(divert_t *divert_handle) {
 
 static inline packet_info_t *divert_new_error_packet(u_int64_t flag) {
     packet_info_t *new_packet = malloc(sizeof(packet_info_t));
-    new_packet->sin = NULL;
     new_packet->ip_data = NULL;
-    new_packet->proc_info = NULL;
     new_packet->flag = flag;
     return new_packet;
 }
@@ -400,15 +398,13 @@ static void *divert_thread_callback(void *arg) {
         if (packet->flag & DIVERT_RAW_IP_PACKET) {
             // call the callback function
             if (handle->flags & DIVERT_FLAG_TCP_REASSEM) {
-                tcp_stream_pid = packet->proc_info->pid;
-                tcp_stream_epid = packet->proc_info->epid;
+                tcp_stream_pid = packet->proc_info.pid;
+                tcp_stream_epid = packet->proc_info.epid;
                 divert_feed_nids(packet->ip_data);
             }
-            callback(callback_args, packet->proc_info,
-                     packet->ip_data, packet->sin);
+            callback(callback_args, &packet->proc_info,
+                     packet->ip_data, &packet->sin);
             free(packet->ip_data);
-            free(packet->proc_info);
-            free(packet->sin);
             free(packet);
         } else if (packet->flag &
                    (DIVERT_ERROR_DIVERT_NODATA |
@@ -448,13 +444,16 @@ static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
     }
 
     while (divert_handle->is_looping) {
-        struct sockaddr *sin = calloc(sin_len, sizeof(u_char));
+        struct sockaddr sin;
 
         // returns a packet of IP protocol structure
-        num_divert = recvfrom(divert_handle->divert_fd,
-                              divert_handle->divert_buffer,
-                              divert_handle->bufsize, 0,
-                              sin, &sin_len);
+        do {
+            num_divert = recvfrom(divert_handle->divert_fd,
+                                  divert_handle->divert_buffer,
+                                  divert_handle->bufsize, 0,
+                                  &sin, &sin_len);
+        } while (num_divert == -1 && errno == EINTR);
+
 
         if (num_divert > 0) {
             // extract the headers of current packet
@@ -468,16 +467,15 @@ static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
                 new_packet->flag = DIVERT_RAW_IP_PACKET;
                 // allocate memory
                 new_packet->ip_data = malloc(ip_length);
-                new_packet->proc_info = malloc(sizeof(proc_info_t));
                 divert_query_proc_by_packet(divert_handle,
-                                            packet_hdrs.ip_hdr, sin,
-                                            new_packet->proc_info);
+                                            packet_hdrs.ip_hdr, &sin,
+                                            &new_packet->proc_info);
                 // and copy data
                 memcpy(new_packet->ip_data, packet_hdrs.ip_hdr, ip_length);
                 divert_buf_insert(divert_handle->thread_buffer, new_packet);
                 // update statistics
-                if (new_packet->proc_info->pid == -1 &&
-                    new_packet->proc_info->epid == -1) {
+                if (new_packet->proc_info.pid == -1 &&
+                    new_packet->proc_info.epid == -1) {
                     divert_handle->num_unknown++;
                 }
                 divert_handle->num_diverted++;
@@ -485,13 +483,11 @@ static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
                 // IP packet is invalid
                 divert_buf_insert(divert_handle->thread_buffer,
                                   divert_new_error_packet(DIVERT_ERROR_INVALID_IP));
-                free(sin);
             }
         } else {
             // no valid data, so insert a flag into thread buffer
             divert_buf_insert(divert_handle->thread_buffer,
                               divert_new_error_packet(DIVERT_ERROR_DIVERT_NODATA));
-            free(sin);
         }
         if (count > 0 && divert_handle->num_diverted > count) {
             goto finish;
@@ -551,7 +547,7 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
     /* array to hold kqueue events */
     struct kevent events[MAX_EVENT_COUNT];
     while (divert_handle->is_looping) {
-        struct sockaddr *sin = calloc(sin_len, sizeof(u_char));
+        struct sockaddr sin;
         // if the kevent is interrupted by signal, then just retry it
         do {
             num_events = kevent(kq, NULL, 0, events, MAX_EVENT_COUNT, NULL);
@@ -565,10 +561,12 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
                 uintptr_t fd = events[i].ident;
                 if (fd == divert_handle->divert_fd) {
                     // returns a packet of IP protocol structure
-                    num_divert = recvfrom(divert_handle->divert_fd,
-                                          divert_handle->divert_buffer,
-                                          divert_handle->bufsize, 0,
-                                          sin, &sin_len);
+                    do {
+                        num_divert = recvfrom(divert_handle->divert_fd,
+                                              divert_handle->divert_buffer,
+                                              divert_handle->bufsize, 0,
+                                              &sin, &sin_len);
+                    } while (num_divert == -1 && errno == EINTR);
 
                     if (num_divert > 0) {
                         // extract the headers of current packet
@@ -582,16 +580,15 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
                             new_packet->flag = DIVERT_RAW_IP_PACKET;
                             // allocate memory
                             new_packet->ip_data = malloc(ip_length);
-                            new_packet->proc_info = malloc(sizeof(proc_info_t));
                             divert_query_proc_by_packet(divert_handle,
-                                                        packet_hdrs.ip_hdr, sin,
-                                                        new_packet->proc_info);
+                                                        packet_hdrs.ip_hdr, &sin,
+                                                        &new_packet->proc_info);
                             // and copy data
                             memcpy(new_packet->ip_data, packet_hdrs.ip_hdr, ip_length);
                             divert_buf_insert(divert_handle->thread_buffer, new_packet);
                             // update statistics
-                            if (new_packet->proc_info->pid == -1 &&
-                                new_packet->proc_info->epid == -1) {
+                            if (new_packet->proc_info.pid == -1 &&
+                                new_packet->proc_info.epid == -1) {
                                 divert_handle->num_unknown++;
                             }
                             divert_handle->num_diverted++;
@@ -599,13 +596,11 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
                             // IP packet is invalid
                             divert_buf_insert(divert_handle->thread_buffer,
                                               divert_new_error_packet(DIVERT_ERROR_INVALID_IP));
-                            free(sin);
                         }
                     } else {
                         // no valid data, so insert a flag into thread buffer
                         divert_buf_insert(divert_handle->thread_buffer,
                                           divert_new_error_packet(DIVERT_ERROR_DIVERT_NODATA));
-                        free(sin);
                     }
                     if (count > 0 && divert_handle->num_diverted > count) {
                         goto finish;
@@ -725,17 +720,15 @@ ssize_t divert_read(divert_t *handle,
             // copy the data to user buffer
             memcpy(ip_data, packet->ip_data,
                    ntohs(packet->ip_data->ip_len));
-            memcpy(sin, packet->sin, sizeof(struct sockaddr));
+            memcpy(sin, &packet->sin, sizeof(struct sockaddr));
             if (handle->flags & DIVERT_FLAG_TCP_REASSEM) {
-                tcp_stream_pid = packet->proc_info->pid;
-                tcp_stream_epid = packet->proc_info->epid;
+                tcp_stream_pid = packet->proc_info.pid;
+                tcp_stream_epid = packet->proc_info.epid;
                 divert_feed_nids(packet->ip_data);
             }
-            memcpy(proc_info_buf, packet->proc_info, sizeof(proc_info_t));
+            memcpy(proc_info_buf, &packet->proc_info, sizeof(proc_info_t));
             // free the allocated memory
             free(packet->ip_data);
-            free(packet->proc_info);
-            free(packet->sin);
             free(packet);
             ret_val = 0;
         } else if (packet->flag &
@@ -760,8 +753,12 @@ ssize_t divert_reinject(divert_t *handle, struct ip *packet,
     if (length < 0) {
         length = ntohs(((struct ip *)packet)->ip_len);
     }
-    return sendto(handle->divert_fd, packet,
-                  (size_t)length, 0, sin, sin_len);
+    ssize_t ret_val;
+    do {
+        ret_val = sendto(handle->divert_fd, packet,
+                         (size_t)length, 0, sin, sin_len);
+    } while (ret_val == -1 && errno == EINTR);
+    return ret_val;
 }
 
 int divert_is_looping(divert_t *handle) {

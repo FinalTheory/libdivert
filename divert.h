@@ -131,8 +131,8 @@ typedef struct {
 typedef struct {
     u_int64_t flag;
     struct ip *ip_data;
-    struct sockaddr *sin;
-    proc_info_t *proc_info;
+    struct sockaddr sin;
+    proc_info_t proc_info;
 } packet_info_t;
 
 divert_t *divert_create(int port_number, u_int32_t flags);
