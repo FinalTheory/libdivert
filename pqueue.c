@@ -29,13 +29,21 @@ PQueue *pqueue_new(int (*cmp)(const void *d1, const void *d2),
     NP_CHECK(res->data);
     res->size = 0;
     res->capacity = capacity;
+
+    if (pthread_cond_init(&res->UntilNotEmpty, NULL) ||
+        pthread_cond_init(&res->UntilNotFull, NULL) ||
+        pthread_mutex_init(&res->mutex, NULL)) {
+        free(res->data);
+        free(res);
+        return NULL;
+    }
     return (res);
 }
 
 /**
 * De-allocates memory for a given Priority Queue structure .
 */
-void pqueue_delete(PQueue *q) {
+void pqueue_destroy(PQueue *q) {
     if (NULL == q) {
         DEBUG("Priority Queue is already NULL. Nothing to free.");
         return;
@@ -45,6 +53,24 @@ void pqueue_delete(PQueue *q) {
     }
 }
 
+/*
+ * Wait until a new element is inserted
+ */
+void pqueue_wait_until(PQueue *q,
+                       struct timeval *timeout) {
+    pthread_mutex_lock(&q->mutex);
+    if (timeout == NULL) {
+        pthread_cond_wait(&q->UntilNotEmpty, &q->mutex);
+    } else {
+        struct timespec ts;
+        ts.tv_sec = timeout->tv_sec;
+        ts.tv_nsec = timeout->tv_usec * 1000;
+        pthread_cond_timedwait(&q->UntilNotEmpty, &q->mutex, &ts);
+    }
+    pthread_mutex_unlock(&q->mutex);
+}
+
+
 /**
 * Adds a new element to the Priority Queue .
 */
@@ -52,9 +78,9 @@ void pqueue_enqueue(PQueue *q, const void *data) {
     size_t i;
     void *tmp = NULL;
     NP_CHECK(q);
-    if (q->size >= q->capacity) {
-        DEBUG("Priority Queue is full. Cannot add another element .");
-        return;
+    pthread_mutex_lock(&q->mutex);
+    while (q->size >= q->capacity) {
+        pthread_cond_wait(&q->UntilNotFull, &q->mutex);
     }
     /* Adds element last */
     q->data[q->size] = (void *)data;
@@ -68,17 +94,57 @@ void pqueue_enqueue(PQueue *q, const void *data) {
         q->data[PARENT(i)] = tmp;
         i = PARENT(i);
     }
+    pthread_cond_signal(&q->UntilNotEmpty);
+    pthread_mutex_unlock(&q->mutex);
 }
 
 /**
 * Returns the element with the biggest priority from the queue .
 */
 void *pqueue_head(PQueue *q) {
-    if (q->size > 0) {
-        return (q->data[0]);
-    } else {
-        return NULL;
+    void *res = NULL;
+    pthread_mutex_lock(&q->mutex);
+    while (q->size < 1) {
+        pthread_cond_wait(&q->UntilNotEmpty, &q->mutex);
     }
+    res = (q->data[0]);
+    pthread_mutex_unlock(&q->mutex);
+    return res;
+}
+
+/**
+* Returns size and capacity of a queue
+*/
+size_t pqueue_size(PQueue *q) {
+    size_t res = 0;
+    pthread_mutex_lock(&q->mutex);
+    res = q->size;
+    pthread_mutex_unlock(&q->mutex);
+    return res;
+}
+
+size_t pqueue_capacity(PQueue *q) {
+    size_t res = 0;
+    pthread_mutex_lock(&q->mutex);
+    res = q->capacity;
+    pthread_mutex_unlock(&q->mutex);
+    return res;
+}
+
+int pqueue_is_full(PQueue *q) {
+    int res = 0;
+    pthread_mutex_lock(&q->mutex);
+    res = q->size >= q->capacity;
+    pthread_mutex_unlock(&q->mutex);
+    return res;
+}
+
+int pqueue_is_empty(PQueue *q) {
+    int res = 0;
+    pthread_mutex_lock(&q->mutex);
+    res = q->size < 1;
+    pthread_mutex_unlock(&q->mutex);
+    return res;
 }
 
 /**
@@ -87,16 +153,17 @@ void *pqueue_head(PQueue *q) {
 void *pqueue_dequeue(PQueue *q) {
     void *data = NULL;
     NP_CHECK(q);
-    if (q->size < 1) {
-        /* Priority Queue is empty */
-        DEBUG("Priority Queue underflow . Cannot remove another element .");
-        return NULL;
+    pthread_mutex_lock(&q->mutex);
+    while (q->size < 1) {
+        pthread_cond_wait(&q->UntilNotEmpty, &q->mutex);
     }
     data = q->data[0];
     q->data[0] = q->data[q->size - 1];
     q->size--;
     /* Restore heap property */
     pqueue_heapify(q, 0);
+    pthread_cond_signal(&q->UntilNotFull);
+    pthread_mutex_unlock(&q->mutex);
     return (data);
 }
 

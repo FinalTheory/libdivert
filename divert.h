@@ -88,7 +88,7 @@ typedef struct {
     /*
      * pcap handler
      */
-    packet_buf_t *thread_buffer;    // buffer for labeled packet
+    circ_buf_t *thread_buffer;    // buffer for labeled packet
     size_t thread_buffer_size;      // buffer size of labeled packet
 
     /*
@@ -104,6 +104,8 @@ typedef struct {
     divert_callback_t callback;
     void *callback_args;
     volatile u_char is_looping;
+
+    char *ipfw_filter;
 
     // store error code and message
     char errmsg[DIVERT_ERRBUF_SIZE];

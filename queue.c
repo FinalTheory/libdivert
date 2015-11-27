@@ -3,122 +3,122 @@
 #include <string.h>
 
 queue_t *queue_create(queue_free_function_t free_func) {
-    queue_t *queue = malloc(sizeof(queue_t));
-    memset(queue, 0, sizeof(queue_t));
-    queue->free_data_func = free_func;
-    return queue;
+    queue_t *q = malloc(sizeof(queue_t));
+    memset(q, 0, sizeof(queue_t));
+    q->free_data_func = free_func;
+    if (pthread_mutex_init(&q->mutex, NULL) ||
+        pthread_cond_init(&q->new_item, NULL)) {
+        free(q);
+        return NULL;
+    }
+    return q;
 }
 
-void queue_dump(queue_t *queue, FILE *fp) {
-    queue_node_t *node = queue->head;
+void queue_destroy(queue_t *q) {
+    if (q != NULL) {
+        for (queue_node_t *prev = NULL,*cur = q->head;
+             cur != NULL;) {
+            q->free_data_func(cur->data);
+            prev = cur;
+            cur = cur->next;
+            free(prev);
+        }
+        free(q);
+    }
+}
+
+void queue_dump(queue_t *q, FILE *fp) {
+    pthread_mutex_lock(&q->mutex);
+    queue_node_t *node = q->head;
     while (node != NULL) {
-        if (node != queue->head) {
+        if (node != q->head) {
             fprintf(fp, " => ");
         }
         fprintf(fp, "%p", node);
         node = node->next;
     }
     fprintf(fp, " => NULL\n");
+    pthread_mutex_unlock(&q->mutex);
 }
 
-queue_node_t *queue_push(queue_t *queue, void *data) {
+void *queue_head(queue_t *q) {
+    void *res = NULL;
+    pthread_mutex_lock(&q->mutex);
+    if (q->head == NULL || q->tail == NULL) {
+        // this is a empty queue
+        while (q->size < 1) {
+            pthread_cond_wait(&q->new_item, &q->mutex);
+        }
+    }
+    res = q->head->data;
+    pthread_mutex_unlock(&q->mutex);
+    return res;
+}
+
+queue_node_t *queue_enqueue(queue_t *q, void *data) {
     queue_node_t *new_node = malloc(sizeof(queue_node_t));
     new_node->next = NULL;
     new_node->data = data;
+    pthread_mutex_lock(&q->mutex);
     // if this queue is empty
-    if (queue->head == NULL || queue->tail == NULL) {
-        queue->head = new_node;
-        queue->tail = new_node;
+    if (q->head == NULL || q->tail == NULL) {
+        q->head = new_node;
+        q->tail = new_node;
     } else {
-        queue->tail->next = new_node;
-        queue->tail = new_node;
+        q->tail->next = new_node;
+        q->tail = new_node;
     }
-    queue->size++;
+    q->size++;
+    pthread_cond_signal(&q->new_item);
+    pthread_mutex_unlock(&q->mutex);
     return new_node;
 }
 
-queue_node_t *queue_pop(queue_t *queue) {
-    queue_node_t *result = NULL;
-    if (queue->head == NULL || queue->tail == NULL) {
+void *queue_dequeue(queue_t *q) {
+    void *result = NULL;
+    queue_node_t *ptr = NULL;
+    pthread_mutex_lock(&q->mutex);
+    if (q->head == NULL || q->tail == NULL) {
         // this is a empty queue
-        result = NULL;
-    } else {
-        // this queue is not empty
-        result = queue->head;
-        if (queue->head == queue->tail) {
-            // this is a queue with only one element
-            queue->head = NULL;
-            queue->tail = NULL;
-        } else {
-            queue->head = queue->head->next;
+        while (q->size < 1) {
+            pthread_cond_wait(&q->new_item, &q->mutex);
         }
-        queue->size--;
     }
+    // this queue is not empty
+    ptr = q->head;
+    result = q->head->data;
+    if (q->head == q->tail) {
+        // this is a queue with only one element
+        q->head = NULL;
+        q->tail = NULL;
+    } else {
+        q->head = q->head->next;
+    }
+    free(ptr);
+    q->size--;
+    pthread_mutex_unlock(&q->mutex);
     return result;
 }
 
-queue_node_t *queue_head(queue_t *queue) {
-    if (queue == NULL) {
-        return NULL;
+
+size_t queue_size(queue_t *q) {
+    size_t res = 0;
+    pthread_mutex_lock(&q->mutex);
+    res = q->size;
+    pthread_mutex_unlock(&q->mutex);
+    return res;
+}
+
+void queue_wait_until(queue_t *q,
+                      struct timeval *timeout) {
+    pthread_mutex_lock(&q->mutex);
+    if (timeout == NULL) {
+        pthread_cond_wait(&q->new_item, &q->mutex);
     } else {
-        return queue->head;
+        struct timespec ts;
+        ts.tv_sec = timeout->tv_sec;
+        ts.tv_nsec = timeout->tv_usec * 1000;
+        pthread_cond_timedwait(&q->new_item, &q->mutex, &ts);
     }
-}
-
-static inline void queue_delete_node(queue_t *queue,
-                                     queue_node_t *prev,
-                                     queue_node_t *next) {
-    if (prev == NULL && next == NULL) {
-        // if there is only one node
-        queue->head = queue->tail = NULL;
-    } else if (prev == NULL) {
-        // if this is the first node
-        queue->head = next;
-    } else if (next == NULL) {
-        // if this is the last node
-        queue->tail = prev;
-        prev->next = NULL;
-    } else {
-        prev->next = next;
-    }
-    queue->size--;
-}
-
-queue_node_t *queue_search_and_drop(queue_t *queue,
-                                    void *data, void *args,
-                                    queue_compare_function_t cmp,
-                                    queue_drop_function_t drop) {
-    queue_node_t *current_node = queue->head;
-    queue_node_t *prev_node = NULL;
-    while (current_node != NULL) {
-        // if found, then remove
-        if (cmp(current_node->data, data)) {
-            queue_delete_node(queue, prev_node, current_node->next);
-            return current_node;
-        }
-        // if current data should be dropped
-        if (drop(current_node->data, args)) {
-            queue_delete_node(queue, prev_node, current_node->next);
-            queue->free_data_func(current_node->data);
-            free(current_node);
-        } else {
-            prev_node = current_node;
-        }
-        current_node = current_node->next;
-    }
-    return NULL;
-}
-
-void queue_destroy(queue_t *queue) {
-    if (queue != NULL) {
-        queue_node_t *prev = NULL;
-        for (queue_node_t *cur = queue->head;
-             cur != NULL; ) {
-            queue->free_data_func(cur->data);
-            prev = cur;
-            cur = cur->next;
-            free(prev);
-        }
-        free(queue);
-    }
+    pthread_mutex_unlock(&q->mutex);
 }

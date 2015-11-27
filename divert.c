@@ -66,12 +66,26 @@ int divert_set_callback(divert_t *handle, divert_callback_t callback, void *args
 }
 
 int divert_update_ipfw(divert_t *handle, char *divert_filter) {
-    // do not care if it fails
-    ipfw_delete(handle->ipfw_id, handle->errmsg);
-    return ipfw_setup(strdup(divert_filter),
-                      (u_short)handle->ipfw_id,
-                      (u_short)handle->divert_port,
-                      handle->errmsg);
+    char *new_filter = strdup(divert_filter);
+    int ret_val = 0;
+    if (handle->is_looping) {
+        ret_val = ipfw_delete(handle->ipfw_id, handle->errmsg);
+        if (ret_val != 0) { goto fail; }
+        ret_val = ipfw_setup(new_filter,
+                             (u_short)handle->ipfw_id,
+                             (u_short)handle->divert_port,
+                             handle->errmsg);
+        if (ret_val != 0) { goto fail; }
+    } else {
+        handle->ipfw_filter = new_filter;
+        goto success;
+    }
+    fail:
+    sprintf(handle->errmsg, "ipfw filter set failed.");
+    free(new_filter);
+    return ret_val;
+    success:
+    return 0;
 }
 
 static int divert_init_divert_socket(divert_t *divert_handle) {
@@ -114,10 +128,9 @@ static int divert_init_divert_socket(divert_t *divert_handle) {
     }
 
     /* allocate thread buffer to store labeled packet */
-    divert_handle->thread_buffer = malloc(sizeof(packet_buf_t));
-    if (divert_buf_init(divert_handle->thread_buffer,
-                        divert_handle->thread_buffer_size,
-                        divert_handle->errmsg) != 0) {
+    divert_handle->thread_buffer =
+            circ_buf_create(divert_handle->thread_buffer_size);
+    if (divert_handle->thread_buffer == NULL) {
         return DIVERT_BUF_FAILURE;
     }
 
@@ -360,8 +373,6 @@ int divert_activate(divert_t *divert_handle) {
         return NIDS_FAILURE;
     }
 
-    divert_handle->is_looping = 1;
-
     return 0;
 }
 
@@ -389,11 +400,11 @@ static void divert_feed_nids(struct ip *packet) {
 static void *divert_thread_callback(void *arg) {
     packet_info_t *packet;
     divert_t *handle = (divert_t *)arg;
-    packet_buf_t *buf = handle->thread_buffer;
+    circ_buf_t *buf = handle->thread_buffer;
     divert_callback_t callback = handle->callback;
     void *callback_args = handle->callback_args;
     while (handle->is_looping) {
-        packet = divert_buf_remove(buf);
+        packet = circ_buf_remove(buf);
         // if this is a normal data packet
         if (packet->flag & DIVERT_RAW_IP_PACKET) {
             // call the callback function
@@ -472,7 +483,7 @@ static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
                                             &new_packet->proc_info);
                 // and copy data
                 memcpy(new_packet->ip_data, packet_hdrs.ip_hdr, ip_length);
-                divert_buf_insert(divert_handle->thread_buffer, new_packet);
+                circ_buf_insert(divert_handle->thread_buffer, new_packet);
                 // update statistics
                 if (new_packet->proc_info.pid == -1 &&
                     new_packet->proc_info.epid == -1) {
@@ -481,13 +492,13 @@ static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
                 divert_handle->num_diverted++;
             } else {
                 // IP packet is invalid
-                divert_buf_insert(divert_handle->thread_buffer,
-                                  divert_new_error_packet(DIVERT_ERROR_INVALID_IP));
+                circ_buf_insert(divert_handle->thread_buffer,
+                                divert_new_error_packet(DIVERT_ERROR_INVALID_IP));
             }
         } else {
             // no valid data, so insert a flag into thread buffer
-            divert_buf_insert(divert_handle->thread_buffer,
-                              divert_new_error_packet(DIVERT_ERROR_DIVERT_NODATA));
+            circ_buf_insert(divert_handle->thread_buffer,
+                            divert_new_error_packet(DIVERT_ERROR_DIVERT_NODATA));
         }
         if (count > 0 && divert_handle->num_diverted > count) {
             goto finish;
@@ -496,8 +507,8 @@ static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
     finish:
     divert_handle->is_looping = 0;
     // insert an item into the thread buffer to stop another thread
-    divert_buf_insert(divert_handle->thread_buffer,
-                      divert_new_error_packet(DIVERT_STOP_LOOP));
+    circ_buf_insert(divert_handle->thread_buffer,
+                    divert_new_error_packet(DIVERT_STOP_LOOP));
 
     if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
         // wait until the child thread is stopped
@@ -554,8 +565,8 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
         } while (num_events == -1 && errno == EINTR);
 
         if (num_events == -1) {
-            divert_buf_insert(divert_handle->thread_buffer,
-                              divert_new_error_packet(DIVERT_ERROR_KQUEUE));
+            circ_buf_insert(divert_handle->thread_buffer,
+                            divert_new_error_packet(DIVERT_ERROR_KQUEUE));
         } else {
             for (int i = 0; i < num_events; i++) {
                 uintptr_t fd = events[i].ident;
@@ -585,7 +596,7 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
                                                         &new_packet->proc_info);
                             // and copy data
                             memcpy(new_packet->ip_data, packet_hdrs.ip_hdr, ip_length);
-                            divert_buf_insert(divert_handle->thread_buffer, new_packet);
+                            circ_buf_insert(divert_handle->thread_buffer, new_packet);
                             // update statistics
                             if (new_packet->proc_info.pid == -1 &&
                                 new_packet->proc_info.epid == -1) {
@@ -594,13 +605,13 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
                             divert_handle->num_diverted++;
                         } else {
                             // IP packet is invalid
-                            divert_buf_insert(divert_handle->thread_buffer,
-                                              divert_new_error_packet(DIVERT_ERROR_INVALID_IP));
+                            circ_buf_insert(divert_handle->thread_buffer,
+                                            divert_new_error_packet(DIVERT_ERROR_INVALID_IP));
                         }
                     } else {
                         // no valid data, so insert a flag into thread buffer
-                        divert_buf_insert(divert_handle->thread_buffer,
-                                          divert_new_error_packet(DIVERT_ERROR_DIVERT_NODATA));
+                        circ_buf_insert(divert_handle->thread_buffer,
+                                        divert_new_error_packet(DIVERT_ERROR_DIVERT_NODATA));
                     }
                     if (count > 0 && divert_handle->num_diverted > count) {
                         goto finish;
@@ -619,8 +630,8 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
     finish:
     divert_handle->is_looping = 0;
     // insert an item into the thread buffer to stop another thread
-    divert_buf_insert(divert_handle->thread_buffer,
-                      divert_new_error_packet(DIVERT_STOP_LOOP));
+    circ_buf_insert(divert_handle->thread_buffer,
+                    divert_new_error_packet(DIVERT_STOP_LOOP));
 
     if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
         // wait until the child thread is stopped
@@ -654,7 +665,7 @@ int divert_loop(divert_t *divert_handle, int count) {
     divert_handle->errmsg[0] = 0;
 
     // setup firewall to redirect all traffic to divert socket
-    if (ipfw_setup(NULL,
+    if (ipfw_setup(divert_handle->ipfw_filter,
                    (u_short)divert_handle->ipfw_id,
                    (u_short)divert_handle->divert_port,
                    divert_handle->errmsg) != 0) {
@@ -714,7 +725,7 @@ ssize_t divert_read(divert_t *handle,
         ret_val = DIVERT_READ_EOF;
     } else {
         packet_info_t *packet =
-                divert_buf_remove(handle->thread_buffer);
+                circ_buf_remove(handle->thread_buffer);
         // do flag checking
         if (packet->flag & DIVERT_RAW_IP_PACKET) {
             // copy the data to user buffer
@@ -784,8 +795,19 @@ static void *_divert_loop_stop_func(void *args) {
     read(handle->exit_fd[0], str_buf, sizeof(str_buf));
     assert(str_buf[0] == 's');
 
-    // finally clean firewall rule
+    // clean firewall rule
     ipfw_delete(handle->ipfw_id, handle->errmsg);
+
+    // finally re-inject all buffered packets
+    while (!circ_buf_is_empty(handle->thread_buffer)) {
+        packet_info_t *packet = circ_buf_remove(handle->thread_buffer);
+        if (packet == NULL) { continue; }
+        if (packet->flag & DIVERT_RAW_IP_PACKET) {
+            divert_reinject(handle, packet->ip_data, -1, &packet->sin);
+            free(packet->ip_data);
+        }
+        free(packet);
+    }
 
     return NULL;
 }
@@ -806,7 +828,7 @@ int divert_close(divert_t *divert_handle) {
     close(divert_handle->divert_fd);
     if (divert_handle->divert_buffer != NULL) {
         free(divert_handle->divert_buffer);
-        divert_buf_clean(divert_handle->thread_buffer);
+        circ_buf_destroy(divert_handle->thread_buffer);
     }
 
     // close the kext communication describpor

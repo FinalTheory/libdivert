@@ -1,6 +1,8 @@
 #ifndef DIVERT_QUEUE_H
 #define DIVERT_QUEUE_H
+
 #include <stdio.h>
+#include <unistd.h>
 #include <sys/types.h>
 #include <pthread.h>
 
@@ -25,26 +27,25 @@ typedef struct {
     queue_node_t *tail;
     u_int32_t size;
     queue_free_function_t free_data_func;
+    pthread_mutex_t mutex;
+    pthread_cond_t new_item;
 } queue_t;
 
 
 queue_t *queue_create(queue_free_function_t free_func);
 
-queue_node_t *queue_head(queue_t *queue);
+void queue_destroy(queue_t *q);
 
-queue_node_t *queue_push(queue_t *queue, void *data);
+void queue_dump(queue_t *q, FILE *fp);
 
-queue_node_t *queue_pop(queue_t *queue);
+void *queue_head(queue_t *q);
 
-queue_node_t *queue_search_and_drop(queue_t *queue,
-                                    void *data, void *args,
-                                    queue_compare_function_t cmp,
-                                    queue_drop_function_t drop);
+queue_node_t *queue_enqueue(queue_t *q, void *data);
 
-queue_node_t *queue_search(queue_t *queue, void *data);
+void *queue_dequeue(queue_t *q);
 
-void queue_destroy(queue_t *queue);
+size_t queue_size(queue_t *q);
 
-void queue_dump(queue_t *queue, FILE *fp);
+void queue_wait_until(queue_t *q, struct timeval *timeout);
 
 #endif //DIVERT_QUEUE_H

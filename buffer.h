@@ -2,24 +2,43 @@
 #define DIVERT_PACKET_BUFFER_H
 
 #include <pthread.h>
+#include <unistd.h>
 
 typedef struct {
-    void **buffer;         /* buffer array */
+    /* buffer array */
+    void **buffer;
+    /* size and capacity */
     size_t size;
-    size_t n;              /* maximum number of slots */
-    size_t front;          /* buf[(front+1)%n] is first item */
-    size_t rear;           /* buf[rear%n] is last item */
-    pthread_mutex_t *mutex;/* buffer mutex lock */
-    pthread_cond_t *UntilNotEmpty;
-    pthread_cond_t *UntilNotFull;
-} packet_buf_t;
+    size_t capacity;
+    /* maximum number of slots */
+    size_t front;
+    /* buf[(front+1)%n] is first item */
+    size_t rear;
+    /* buf[rear%n] is last item */
+    pthread_mutex_t mutex;
+    /* binary semaphore for locking */
+    pthread_cond_t UntilNotEmpty;
+    /* condition variables for notify */
+    pthread_cond_t UntilNotFull;
+} circ_buf_t;
 
-int divert_buf_init(packet_buf_t *sp, size_t n, char *errmsg);
+circ_buf_t *circ_buf_create(size_t capacity);
 
-void divert_buf_clean(packet_buf_t *sp);
+void circ_buf_destroy(circ_buf_t *sp);
 
-void divert_buf_insert(packet_buf_t *sp, void *item);
+size_t circ_buf_size(circ_buf_t *sp);
 
-void *divert_buf_remove(packet_buf_t *sp);
+size_t circ_buf_capacity(circ_buf_t *sp);
+
+int circ_buf_is_full(circ_buf_t *sp);
+
+int circ_buf_is_empty(circ_buf_t *sp);
+
+void circ_buf_insert(circ_buf_t *sp, void *item);
+
+void *circ_buf_remove(circ_buf_t *sp);
+
+void circ_buf_wait_until(circ_buf_t *sp,
+                         struct timeval *timeout);
 
 #endif //DIVERT_PACKET_BUFFER_H
