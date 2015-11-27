@@ -29,7 +29,7 @@ set(LIB_SOURCE_FILES
         divert_kext.c
         emulator/emulator_callback.c
         emulator/emulator_config.c
-        emulator/pqueue.c)
+        pqueue.c)
 
 # these are used to link to apple frameworks
 find_library(CORE_SERV CoreServices)
@@ -48,3 +48,4 @@ set_target_properties(divert PROPERTIES LINK_FLAGS -all_load SUFFIX ".so")
 
 # below executables are demos
 add_subdirectory(demo)
+add_subdirectory(emulator)

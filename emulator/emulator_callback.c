@@ -4,10 +4,6 @@
 #include "dump_packet.h"
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
-#include <pthread.h>
-#include <sys/time.h>
-#include <math.h>
 #include <divert.h>
 
 
@@ -16,14 +12,24 @@ rand_double() {
     return rand() / (double)RAND_MAX;
 }
 
-static double
+inline static int
+time_greater_than(struct timeval *a, struct timeval *b) {
+    if (a->tv_sec != b->tv_sec) {
+        return a->tv_sec > b->tv_sec;
+    } else {
+        return a->tv_usec > b->tv_usec;
+    }
+}
+
+inline static double
 time_minus(struct timeval *a, struct timeval *b) {
     double delta_secs = a->tv_sec - b->tv_sec;
     double delta_usecs = a->tv_usec - b->tv_usec;
     return delta_secs + delta_usecs / 1000000.;
 }
 
-static void time_add(struct timeval *tv, double time) {
+static void
+time_add(struct timeval *tv, double time) {
     tv->tv_sec += (long)time;
     tv->tv_usec += (long)((time - (long)time) * 1000000.);
     if (tv->tv_usec > 1000000) {
@@ -32,7 +38,8 @@ static void time_add(struct timeval *tv, double time) {
     }
 }
 
-static int check_pid_in_list(pid_t pid, pid_t *pid_list, ssize_t n) {
+static int
+check_pid_in_list(pid_t pid, pid_t *pid_list, ssize_t n) {
     if (pid_list == NULL || n == 0) {
         // pid_list is empty means match all
         return 1;
@@ -45,33 +52,90 @@ static int check_pid_in_list(pid_t pid, pid_t *pid_list, ssize_t n) {
     return 0;
 }
 
-void *delay_thread_func(void *args) {
-    emulator_config_t *config = (emulator_config_t *)args;
-    // in thread we need to keep a copy of args
-    // used to call the emulator_callback function
-    // at the time that packet should be sent
-    emulator_config_t local_config;
-    memcpy(&local_config, config, sizeof(emulator_config_t));
-
-    while (config->handle->is_looping) {
-
+static int
+check_direction(u_char *arr, int offset, int direction) {
+    if (arr[offset] == DIRECTION_BOTH ||
+        arr[offset] == direction) {
+        return 1;
     }
-    // TODO: send all buffered packets
-    config->delay_thread = (pthread_t)-1;
+    return 0;
+}
+
+static void *
+delay_thread_func(void *args) {
+    emulator_config_t *config = args;
+
+    struct timeval time_now;
+    struct timezone tz;
+    delay_packet_t *ptr = NULL;
+
+    while (1) {
+        // try to send all timeout packets
+        gettimeofday(&time_now, &tz);
+        while (1) {
+            ptr = pqueue_head(config->delay_queue);
+            if (ptr == NULL) { goto finish; }
+            if (time_greater_than(&ptr->time_send, &time_now)) { break; }
+            ptr = pqueue_dequeue(config->delay_queue);
+            // TODO: remove this line
+            printf("sendtime: %ld:%d\n", ptr->time_send.tv_sec, ptr->time_send.tv_usec);
+            ptr->packet->label = STAGE_THROTTLE;
+            circ_buf_insert(config->packet_queue, ptr->packet);
+            CHECK_AND_FREE(ptr)
+        }
+
+        // then wait until next packet could be sent
+        if (pqueue_size(config->delay_queue) > 0) {
+            ptr = pqueue_head(config->delay_queue);
+            if (time_greater_than(&ptr->time_send, &time_now)) {
+                pqueue_wait_until(config->delay_queue, &ptr->time_send);
+            }
+        }
+    }
+    finish:
     return NULL;
 }
 
-void *throttle_thread_func(void *args) {
-    emulator_config_t *config = (emulator_config_t *)args;
-    emulator_config_t local_config;
-    memcpy(&local_config, config, sizeof(emulator_config_t));
+static void *
+throttle_thread_func(void *args) {
+    emulator_config_t *config = args;
+    struct timeval time_send, time_now;
+    struct timezone tz;
 
+    while (1) {
+        // read a packet to determine how long to sleep
+        throttle_packet_t *pkt = queue_head(config->throttle_queue);
+        if (pkt == NULL) { break; }
+        time_send = pkt->time_send;
 
-    // TODO: send all buffered packets
+        // sleep until time to send all buffered packets
+        for (gettimeofday(&time_now, &tz);
+             time_greater_than(&time_send, &time_now);
+             gettimeofday(&time_now, &tz)) {
+            double time_delta = time_minus(&time_send, &time_now);
+            unsigned secs = (unsigned)time_delta;
+            useconds_t usecs = (useconds_t)((time_delta - (double)secs) * 1000000.);
+            sleep((secs));
+            usleep(usecs);
+        }
+
+        gettimeofday(&time_now, &tz);
+        // send out all timeout packets
+        while (queue_size(config->throttle_queue) > 0) {
+            pkt = queue_head(config->throttle_queue);
+            if (time_greater_than(&time_now, &pkt->time_send)) {
+                pkt = queue_dequeue(config->throttle_queue);
+                pkt->packet->label = STAGE_DISORDER;
+                circ_buf_insert(config->packet_queue, pkt->packet);
+                CHECK_AND_FREE(pkt)
+            } else {
+                break;
+            }
+        }
+    }
     config->throttle_thread = (pthread_t)-1;
     return NULL;
 }
-
 
 static double
 calc_val_by_time(float *t, float *val,
@@ -79,7 +143,7 @@ calc_val_by_time(float *t, float *val,
                  struct timeval *tv_start) {
     // guard here to avoid invalid memory access
     if (t == NULL || val == NULL) {
-        return 1.;
+        return 0.;
     }
 
     struct timeval tv;
@@ -105,10 +169,11 @@ calc_val_by_time(float *t, float *val,
     // rewind back a step
     (*p)--;
     // linear interpolate
-    return val[*p] +
-           (t_now - t[*p]) *
-           (val[*p + 1] - val[*p]) /
-           (t[*p + 1] - t[*p]);
+    double result = val[*p] +
+                    (t_now - t[*p]) *
+                    (val[*p + 1] - val[*p]) /
+                    (t[*p + 1] - t[*p]);
+    return result;
 }
 
 static int
@@ -127,178 +192,445 @@ calc_rate_by_size(emulator_config_t *config,
             }
         }
     }
-    // for all other packets, apply the effects
+    // for all other situation, apply the effects
     return 1;
 }
 
+static double
+calc_do_throttle(emulator_config_t *config) {
+    if (config->time_start == NULL ||
+        config->time_end == NULL) {
+        return -1.;
+    }
+    struct timeval tv;
+    struct timezone tz;
+    double ret_val = -1.;
+    gettimeofday(&tv, &tz);
 
-#define PTHREAD_GUARD(FUNC_FLAG, THREAD_T, THREAD_FUNC) \
-    if ((pthread_t)-1 == (THREAD_T) &&                  \
-        (config->flags & FUNC_FLAG)) {                  \
-        pthread_create(&THREAD_T, NULL,                 \
-                        THREAD_FUNC, config);           \
-        pthread_detach(THREAD_T);                       \
+    double end_time = config->time_end[config->t_throttle];
+    double t_now = time_minus(&tv, &config->throttle_start);
+    if (t_now >= end_time) {
+        long k = (long)(t_now / end_time);
+        // then reset it to beginning
+        time_add(&config->throttle_start, end_time * k);
+        t_now -= end_time * k;
+        config->t_throttle = 0;
     }
 
+    while (config->time_start[config->t_throttle] <= t_now) {
+        config->t_throttle++;
+    }
+    config->t_throttle--;
+    if (config->time_start[config->t_throttle] <= t_now &&
+        t_now <= config->time_end[config->t_throttle]) {
+            ret_val = config->time_end[config->t_throttle];
+    }
+
+    return ret_val;
+}
 
 static void
-init_callback_states(emulator_config_t *config) {
-    if (!(config->flags & EMULATOE_IS_RUNNING)) {
-        config->flags |= EMULATOE_IS_RUNNING;
+init_callback_runtime_states(emulator_config_t *config) {
+    if (!(config->flags & EMULATOR_IS_RUNNING)) {
+        config->flags |= EMULATOR_IS_RUNNING;
         srand((unsigned)time(NULL));
         struct timeval tv;
         struct timezone tz;
         gettimeofday(&tv, &tz);
         // copy values to all time stamps
-        memcpy(&config->delay_start, &tv, sizeof(tv));
-        memcpy(&config->disorder_start, &tv, sizeof(tv));
-        memcpy(&config->drop_start, &tv, sizeof(tv));
-        memcpy(&config->duplicate_start, &tv, sizeof(tv));
-        memcpy(&config->tamper_start, &tv, sizeof(tv));
-        memcpy(&config->throttle_start, &tv, sizeof(tv));
+        config->delay_start = tv;
+        config->disorder_start = tv;
+        config->drop_start = tv;
+        config->duplicate_start = tv;
+        config->tamper_start = tv;
+        config->throttle_start = tv;
     }
 }
 
 static void
-send_buffered_disordered_packets(emulator_config_t *config) {
-    if (config->disorder_queue->size > 0) {
-        while (1) {
-            disorder_packet_t *ptr = pqueue_head(config->disorder_queue);
-            if (ptr == NULL || config->counter < ptr->time_send) {
-                break;
-            } else {
-                ptr = pqueue_dequeue(config->disorder_queue);
-                // re-inject the packet
-                divert_reinject(config->handle,
-                                ptr->packet, -1, ptr->sin);
-                CHECK_AND_FREE(ptr->packet)
-                CHECK_AND_FREE(ptr->sin)
-                CHECK_AND_FREE(ptr)
-            }
-        }
+clear_delay_queue(emulator_config_t *config) {
+    emulator_packet_t *packet;
+    while (pqueue_size(config->delay_queue) > 0) {
+        delay_packet_t *ptr = pqueue_dequeue(config->delay_queue);
+        if (ptr == NULL) { continue; }
+        packet = ptr->packet;
+        divert_reinject(config->handle, packet->packet, -1, &packet->sin);
+        CHECK_AND_FREE(ptr)
+        CHECK_AND_FREE(packet->packet)
+        CHECK_AND_FREE(packet)
     }
 }
 
+static void
+clear_disorder_queue(emulator_config_t *config) {
+    emulator_packet_t *packet;
+    while (pqueue_size(config->disorder_queue) > 0) {
+        disorder_packet_t *ptr = pqueue_dequeue(config->disorder_queue);
+        if (ptr == NULL) { continue; }
+        packet = ptr->packet;
+        divert_reinject(config->handle, packet->packet, -1, &packet->sin);
+        CHECK_AND_FREE(ptr)
+        CHECK_AND_FREE(packet->packet)
+        CHECK_AND_FREE(packet)
+    }
+}
+
+static void
+clear_packet_queue(emulator_config_t *config) {
+    emulator_packet_t *packet;
+    while (circ_buf_size(config->packet_queue) > 0) {
+        packet = circ_buf_remove(config->packet_queue);
+        if (packet == NULL) { continue; }
+        divert_reinject(config->handle, packet->packet, -1, &packet->sin);
+        CHECK_AND_FREE(packet->packet)
+        CHECK_AND_FREE(packet)
+    }
+}
+
+static void
+clear_throttle_queue(emulator_config_t *config) {
+    emulator_packet_t *packet;
+    while (queue_size(config->throttle_queue) > 0) {
+        delay_packet_t *ptr = queue_dequeue(config->throttle_queue);
+        if (ptr == NULL) { continue; }
+        packet = ptr->packet;
+        divert_reinject(config->handle, packet->packet, -1, &packet->sin);
+        CHECK_AND_FREE(ptr)
+        CHECK_AND_FREE(packet->packet)
+        CHECK_AND_FREE(packet)
+    }
+}
+
+void *emulator_thread_func(void *args) {
+    /*
+     * initialize local variables
+     * these are of course thread-safe
+     */
+    void *thread_res;
+    char errmsg[DIVERT_ERRBUF_SIZE];
+    packet_hdrs_t headers;
+    emulator_config_t *config = args;
+
+    /*
+     * config && thread init stage
+     */
+    init_callback_runtime_states(config);
+    pthread_create(&config->delay_thread, NULL,
+                   delay_thread_func, config);
+    pthread_create(&config->throttle_thread, NULL,
+                   throttle_thread_func, config);
+
+    while (1) {
+        emulator_packet_t *packet = circ_buf_remove(config->packet_queue);
+        if (packet->label == QUIT_THREAD) { break; }
+        /*
+         * extract packet information
+         */
+        struct sockaddr *sin = &packet->sin;
+        struct ip *ip_data = packet->packet;
+        // dump info of this packet
+        divert_dump_packet((u_char *)ip_data, &headers, errmsg);
+
+        switch (packet->label) {
+            case NEW_PACKET:
+                /*
+                 * this is a dummy entry point
+                 * for all newly arrived packets
+                 */
+            case STAGE_CHECK_SIZE:
+                /*
+                 * determine if we should apply the effects on this packet
+                 * if not, just deliver it to application
+                 */
+                if (!calc_rate_by_size(config, headers.size_payload)) {
+                    goto deliver;
+                }
+            case STAGE_DROP:
+                /*
+                 * packet drop stage
+                 */
+                do {
+                    if (!(config->flags & EMULATOR_DROP)) { break; }
+                    if (!check_direction(config->direction_flags,
+                                         OFFSET_DROP, packet->direction)) { break; }
+                    if (calc_val_by_time(config->time_drop,
+                                         config->drop_rate,
+                                         config->num_drop,
+                                         &config->t_drop,
+                                         &config->drop_start) < rand_double()) {
+                        break;
+                    }
+                    // just drop this packet, skip following stage
+                    // as if we did not receive this packet
+                    goto discard;
+                } while (0);
+            case STAGE_DELAY:
+                /*
+                 * packet delay stage
+                 */
+                do {
+                    if (!(config->flags & EMULATOR_DELAY)) { break; }
+                    if (!check_direction(config->direction_flags,
+                                         OFFSET_DELAY, packet->direction)) { break; }
+                    if (pqueue_is_full(config->delay_queue)) { break; }
+                    // break if the delay time is too short
+                    double delay_time = calc_val_by_time(config->time_delay,
+                                                         config->delay_time,
+                                                         config->num_delay,
+                                                         &config->t_delay,
+                                                         &config->delay_start);
+                    if (delay_time < FLOAT_EPS) { break; }
+
+                    // calculate send time
+                    struct timeval tv;
+                    struct timezone tz;
+                    gettimeofday(&tv, &tz);
+                    time_add(&tv, delay_time);
+                    // TODO: remove this
+                    // fprintf(stderr, "Packet delay %f ms\n", delay_time * 1000);
+                    delay_packet_t *ptr = malloc(sizeof(delay_packet_t));
+                    ptr->packet = packet;
+                    ptr->time_send = tv;
+
+                    // insert packet into delay queue and finish processing
+                    pqueue_enqueue(config->delay_queue, ptr);
+                    goto hijacked;
+                } while (0);
+
+            case STAGE_THROTTLE:
+                /*
+                 * packet throttle stage
+                 */
+                do {
+                    struct timezone tz;
+                    double end_time;
+                    if (!(config->flags & EMULATOR_THROTTLE)) { break; }
+                    if (!check_direction(config->direction_flags,
+                                         OFFSET_THROTTLE, packet->direction)) { break; }
+                    if ((end_time = calc_do_throttle(config)) < 0.) { break; }
+                    throttle_packet_t *ptr = malloc(sizeof(throttle_packet_t));
+                    ptr->packet = packet;
+                    gettimeofday(&ptr->time_send, &tz);
+                    time_add(&ptr->time_send, end_time);
+
+                    queue_enqueue(config->throttle_queue, ptr);
+                    goto hijacked;
+                } while (0);
+
+            case STAGE_DISORDER:
+                /*
+                 * packet disorder stage
+                 */
+                do {
+                    if (!(config->flags & EMULATOR_DISORDER)) { break; }
+                    if (!check_direction(config->direction_flags,
+                                         OFFSET_DISORDER, packet->direction)) { break; }
+                    if (calc_val_by_time(config->time_disorder,
+                                         config->disorder_rate,
+                                         config->num_disorder,
+                                         &config->t_disorder,
+                                         &config->disorder_start) < rand_double()) {
+                        break;
+                    }
+                    // check if there is empty slot in queue
+                    if (pqueue_is_full(config->disorder_queue)) { break; }
+                    if (packet->direction == DIRECTION_UNKNOWN) { break; }
+
+                    disorder_packet_t *ptr =
+                            malloc(sizeof(disorder_packet_t));
+                    ptr->packet = packet;
+                    if (ptr->packet->direction)
+                    ptr->time_send = rand() % MAX_DISORDER_NUM +
+                                     config->counters[packet->direction];
+
+                    // insert packet into disorder queue and finish processing
+                    pqueue_enqueue(config->disorder_queue, ptr);
+                    goto hijacked;
+                } while (0);
+            case STAGE_TAMPER:
+                /*
+                 * packet tamper stage
+                 */
+                do {
+                    if (!(config->flags & EMULATOR_TAMPER)) { break; }
+                    if (!check_direction(config->direction_flags,
+                                         OFFSET_TAMPER, packet->direction)) { break; }
+                    // only apply for packets with payload
+                    if (headers.size_payload <= 0) { break; }
+                    if (calc_val_by_time(config->time_tamper,
+                                         config->tamper_rate,
+                                         config->num_tamper,
+                                         &config->t_tamper,
+                                         &config->tamper_start) < rand_double()) {
+                        break;
+                    }
+                    for (int i = 0, cnt = 0;
+                         i < headers.size_payload &&
+                         cnt < MAX_TAMPER_BYTES; i++) {
+                        if (rand() % TAMPER_CONTROL == 0) {
+                            headers.payload[i] = (u_char)(rand() % 256);
+                            cnt++;
+                        }
+                    }
+                    // if this is a TCP packet
+                    // we should re-calculate the checksum
+                    // TODO: re-checksum
+                    if (ip_data->ip_p == IPPROTO_TCP) {
+                    } else if (ip_data->ip_p == IPPROTO_UDP) {
+                    }
+                } while (0);
+            case STAGE_DUPLICATE:
+                /*
+     * packet duplicate stage
+     */
+                do {
+                    if (!(config->flags & EMULATOR_DUPLICATE)) { break; }
+                    if (!check_direction(config->direction_flags,
+                                         OFFSET_DUPLICATE, packet->direction)) { break; }
+                    if (calc_val_by_time(config->time_duplicate,
+                                         config->duplicate_rate,
+                                         config->num_duplicate,
+                                         &config->t_duplicate,
+                                         &config->duplicate_start) < rand_double()) {
+                        break;
+                    }
+                    int times = rand() % MAX_DUPLICATE_NUM + 1;
+                    for (int i = 0; i < times; i++) {
+                        // just re-inject the packet is OK
+                        divert_reinject(config->handle, ip_data, -1, sin);
+                    }
+                    goto deliver;
+                } while (0);
+            default:
+                break;
+        }
+
+        /*
+         * deliver state
+         * send this packet to application
+         * we should do some complex processing
+         * 1. re-inject this packet
+         * 2. dump packets into .pcap file
+         * 3. move disordered packets into packet queue
+         */
+        deliver:
+        // first re-inject the packet
+        divert_reinject(config->handle, ip_data, -1, sin);
+        // then dump affected packets
+        if (config->flags & EMULATOR_DUMP_PCAP) {
+            divert_dump_pcap(ip_data, config->dump_affected);
+        }
+        // calculate a predicted time stamp
+        // which means that if we put the disordered packet into queue immediately
+        // the largest timestamp at which it would be processed again
+        config->counters[packet->direction]++;
+        uint64_t predict_ts = config->counters[packet->direction] +
+                              circ_buf_size(config->packet_queue);
+        // finally move disorder packets into packet queue
+        while (pqueue_size(config->disorder_queue) > 0) {
+            disorder_packet_t *ptr = pqueue_head(config->disorder_queue);
+            if (ptr == NULL || ptr->time_send > predict_ts) {
+                break;
+            }
+            ptr = pqueue_dequeue(config->disorder_queue);
+            ptr->packet->label = STAGE_TAMPER;
+            circ_buf_insert(config->packet_queue, ptr->packet);
+            CHECK_AND_FREE(ptr)
+        }
+        goto free_mem;
+
+        /*
+         * discard state:
+         * do not deliver this packet
+         * so just free the memory
+         */
+        discard:
+        goto free_mem;
+
+        free_mem:
+        CHECK_AND_FREE(packet->packet)
+        CHECK_AND_FREE(packet)
+
+        hijacked:
+        continue;
+    }
+    pqueue_enqueue(config->delay_queue, NULL);
+    queue_enqueue(config->throttle_queue, NULL);
+    if (config->delay_thread != (pthread_t)-1) {
+        pthread_join(config->delay_thread, &thread_res);
+        config->delay_thread = (pthread_t)-1;
+    }
+    if (config->throttle_thread != (pthread_t)-1) {
+        pthread_join(config->throttle_thread, &thread_res);
+        config->throttle_thread = (pthread_t)-1;
+    }
+    clear_delay_queue(config);
+    clear_throttle_queue(config);
+    clear_disorder_queue(config);
+    clear_packet_queue(config);
+    return NULL;
+}
 
 void emulator_callback(void *args, void *proc,
                        struct ip *ip_data, struct sockaddr *sin) {
-    emulator_config_t *config = (emulator_config_t *)args;
-    config->counter++;
+    // Note: this function won't be reentry
+    emulator_config_t *config = args;
+    proc_info_t *proc_info = proc;
+    pid_t pid = proc_info->pid != -1 ?
+                proc_info->pid : proc_info->epid;
 
-    // first dump info of this packet
-    packet_hdrs_t headers;
-    divert_dump_packet((u_char *)ip_data, &headers,
-                       config->handle->errmsg);
+    // TODO: remove this
+//    char errmsg[256];
+//    packet_hdrs_t headers;
+//    divert_dump_packet((u_char *)ip_data, &headers, errmsg);
+//    if (headers.size_payload) {
+//        for (int i = 0; i < headers.size_payload; i++) {
+//            putchar(headers.payload[i]);
+//        }
+//        puts("");
+//    }
 
-    // ensure this callback is thread safe
-    pthread_mutex_lock(config->mutex);
+    /*
+     * if this packet is from unknown PID
+     * then we must record it first
+     */
+    if (pid == -1 && (config->flags & EMULATOR_DUMP_PCAP)) {
+        divert_dump_pcap(ip_data, config->dump_unknown);
+    }
 
-    proc_info_t *proc_info = (proc_info_t *)proc;
-    pid_t pid = proc_info->pid != -1 ? proc_info->pid : proc_info->epid;
-
-    init_callback_states(config);
-
-    PTHREAD_GUARD(EMULATOR_DELAY, config->delay_thread, delay_thread_func)
-    PTHREAD_GUARD(EMULATOR_THROTTLE, config->throttle_thread, throttle_thread_func)
-
-    // first check if there is still packets in disorder queue
-    send_buffered_disordered_packets(config);
-
-    // just re-inject and return if this packet is not from target process
+    /*
+     * if this packet is not from target process
+     * just re-inject and ignore this packet
+     * notice that re-inject function is thread safe
+     */
     if (!check_pid_in_list(pid, config->pid_list,
                            config->num_pid)) {
-        goto finish;
+        divert_reinject(config->handle, ip_data, -1, sin);
+        return;
     }
 
-    // determine if we should apply the effects on this packet
-    // if not, just goto finish state
-    if (!calc_rate_by_size(config, headers.size_payload)) {
-        goto finish;
+    /*
+     * packet dump stage
+     */
+    if (config->flags & EMULATOR_DUMP_PCAP) {
+        divert_dump_pcap(ip_data, config->dump_normal);
     }
 
-    // packet drop stage
-    if (config->flags & EMULATOR_DROP) {
-        if (calc_val_by_time(config->time_drop,
-                             config->drop_rate,
-                             config->num_drop,
-                             &config->t_drop,
-                             &config->drop_start) < rand_double()) {
-            // just drop this packet
-            goto drop;
-        }
+    /*
+     * packets production stage
+     */
+    emulator_packet_t *packet = malloc(sizeof(emulator_packet_t));
+    MALLOC_AND_COPY(packet->packet, ip_data,
+                    ntohs(ip_data->ip_len), u_char)
+    packet->proc_info = *((proc_info_t *)proc);
+    packet->sin = *sin;
+    packet->label = NEW_PACKET;
+    if (divert_is_inbound(sin, NULL)) {
+        packet->direction = DIRECTION_IN;
+    } else if (divert_is_outbound(sin)) {
+        packet->direction = DIRECTION_OUT;
+    } else {
+        packet->direction = DIRECTION_UNKNOWN;
     }
-
-    // packet delay stage
-    if (config->flags & EMULATOR_DELAY) {
-    }
-
-    // packet disorder stage
-    if (config->flags & EMULATOR_DISORDER) {
-        if (calc_val_by_time(config->time_disorder,
-                             config->disorder_rate,
-                             config->num_disorder,
-                             &config->t_disorder,
-                             &config->disorder_start) < rand_double()) {
-            disorder_packet_t *ptr = malloc(sizeof(disorder_packet_t));
-            MALLOC_AND_COPY(ptr->packet, ip_data, ntohs(ip_data->ip_len), u_char);
-            MALLOC_AND_COPY(ptr->sin, sin, 1, struct sockaddr);
-            ptr->time_send = rand() % MAX_DISORDER_NUM + config->counter;
-            pqueue_enqueue(config->disorder_queue, ptr);
-        }
-    }
-
-    // packet throttle stage
-    if (config->flags & EMULATOR_THROTTLE) {
-    }
-
-    // packet tamper stage
-    if (config->flags & EMULATOR_TAMPER) {
-        // only apply for packets with payload
-        if (headers.size_payload > 0) {
-            if (calc_val_by_time(config->time_tamper,
-                                 config->tamper_rate,
-                                 config->num_tamper,
-                                 &config->t_tamper,
-                                 &config->tamper_start)) {
-                for (int i = 0, cnt = 0;
-                     i < headers.size_payload &&
-                     cnt < MAX_TAMPER_BYTES; i++) {
-                    if (rand() % TAMPER_CONTROL == 0) {
-                        headers.payload[i] = (u_char)(rand() % 256);
-                        cnt++;
-                    }
-                }
-                // if this is a TCP packet
-                // we should re-calculate the checksum
-                // TODO: re-checksum
-                if (ip_data->ip_p == IPPROTO_TCP) {
-                } else if (ip_data->ip_p == IPPROTO_UDP) {
-                }
-                goto finish;
-            }
-        }
-    }
-
-    // packet duplicate stage
-    if (config->flags & EMULATOR_DUPLICATE) {
-        if (calc_val_by_time(config->time_duplicate,
-                             config->duplicate_rate,
-                             config->num_duplicate,
-                             &config->t_duplicate,
-                             &config->duplicate_start) < rand_double()) {
-            int times = rand() % MAX_DUPLICATE_NUM + 2;
-            for (int i = 0; i < times; i++) {
-                // just re-inject the packet is OK
-                divert_reinject(config->handle, ip_data, -1, sin);
-            }
-            goto drop;
-        }
-    }
-
-    // note that we should always unlock the mutex
-    finish:
-    divert_reinject(config->handle, ip_data, -1, sin);
-    drop:
-    pthread_mutex_unlock(config->mutex);
-    return;
+    circ_buf_insert(config->packet_queue, packet);
 }
