@@ -94,9 +94,9 @@ void *queue_dequeue(queue_t *q) {
     } else {
         q->head = q->head->next;
     }
-    free(ptr);
     q->size--;
     pthread_mutex_unlock(&q->mutex);
+    free(ptr);
     return result;
 }
 

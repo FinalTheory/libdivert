@@ -25,6 +25,9 @@ float t[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 float delay[] = {0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.14, 0.16, 0.18, 0.2};
 float rate[] = {0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.14, 0.16, 0.18, 0.2};
 
+float throttle_start[] = {0.5, 1.3, 2.5, 3.6, 5.4, 7.1, 9.6, 15};
+float throttle_end[] = {0.9, 1.8, 2.9, 4.3, 6.0, 7.9, 10.0, 17};
+
 int main(int argc, char *argv[]) {
     // set random seed
     srand((u_int)time(NULL));
@@ -49,15 +52,15 @@ int main(int argc, char *argv[]) {
 
     emulator_config_t *config = emulator_create_config();
 
-    emulator_add_flag(config, EMULATOR_DISORDER);
+    emulator_add_flag(config, EMULATOR_THROTTLE);
 
-    emulator_set_disorder(config, 11, t, rate);
+    emulator_set_throttle(config, 8, throttle_start, throttle_end);
 
     emulator_set_pid(config, pids, 1);
 
     emulator_set_handle(config, handle);
 
-    emulator_set_direction(config, OFFSET_DISORDER, DIRECTION_OUT);
+    emulator_set_direction(config, OFFSET_THROTTLE, DIRECTION_OUT);
 
     if (handle->errmsg[0]) {
         puts(handle->errmsg);

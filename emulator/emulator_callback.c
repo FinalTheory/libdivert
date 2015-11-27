@@ -113,6 +113,7 @@ throttle_thread_func(void *args) {
              time_greater_than(&time_send, &time_now);
              gettimeofday(&time_now, &tz)) {
             double time_delta = time_minus(&time_send, &time_now);
+            printf("sleep %f ms\n", time_delta);
             unsigned secs = (unsigned)time_delta;
             useconds_t usecs = (useconds_t)((time_delta - (double)secs) * 1000000.);
             sleep((secs));
@@ -123,6 +124,7 @@ throttle_thread_func(void *args) {
         // send out all timeout packets
         while (queue_size(config->throttle_queue) > 0) {
             pkt = queue_head(config->throttle_queue);
+            if (pkt == NULL) { break; }
             if (time_greater_than(&time_now, &pkt->time_send)) {
                 pkt = queue_dequeue(config->throttle_queue);
                 pkt->packet->label = STAGE_DISORDER;
@@ -133,7 +135,6 @@ throttle_thread_func(void *args) {
             }
         }
     }
-    config->throttle_thread = (pthread_t)-1;
     return NULL;
 }
 
@@ -167,7 +168,7 @@ calc_val_by_time(float *t, float *val,
         (*p)++;
     }
     // rewind back a step
-    (*p)--;
+    if (*p > 0) { (*p)--; }
     // linear interpolate
     double result = val[*p] +
                     (t_now - t[*p]) *
@@ -207,7 +208,7 @@ calc_do_throttle(emulator_config_t *config) {
     double ret_val = -1.;
     gettimeofday(&tv, &tz);
 
-    double end_time = config->time_end[config->t_throttle];
+    double end_time = config->time_end[config->num_throttle - 1];
     double t_now = time_minus(&tv, &config->throttle_start);
     if (t_now >= end_time) {
         long k = (long)(t_now / end_time);
@@ -220,10 +221,10 @@ calc_do_throttle(emulator_config_t *config) {
     while (config->time_start[config->t_throttle] <= t_now) {
         config->t_throttle++;
     }
-    config->t_throttle--;
+    if (config->t_throttle > 0) { config->t_throttle--; }
     if (config->time_start[config->t_throttle] <= t_now &&
         t_now <= config->time_end[config->t_throttle]) {
-            ret_val = config->time_end[config->t_throttle];
+        ret_val = config->time_end[config->t_throttle];
     }
 
     return ret_val;
@@ -402,16 +403,16 @@ void *emulator_thread_func(void *args) {
                  * packet throttle stage
                  */
                 do {
-                    struct timezone tz;
-                    double end_time;
+                    double delay_time;
                     if (!(config->flags & EMULATOR_THROTTLE)) { break; }
                     if (!check_direction(config->direction_flags,
                                          OFFSET_THROTTLE, packet->direction)) { break; }
-                    if ((end_time = calc_do_throttle(config)) < 0.) { break; }
+                    if ((delay_time = calc_do_throttle(config)) < 0.) { break; }
+
                     throttle_packet_t *ptr = malloc(sizeof(throttle_packet_t));
                     ptr->packet = packet;
-                    gettimeofday(&ptr->time_send, &tz);
-                    time_add(&ptr->time_send, end_time);
+                    ptr->time_send = config->throttle_start;
+                    time_add(&ptr->time_send, delay_time);
 
                     queue_enqueue(config->throttle_queue, ptr);
                     goto hijacked;
@@ -439,7 +440,6 @@ void *emulator_thread_func(void *args) {
                     disorder_packet_t *ptr =
                             malloc(sizeof(disorder_packet_t));
                     ptr->packet = packet;
-                    if (ptr->packet->direction)
                     ptr->time_send = rand() % MAX_DISORDER_NUM +
                                      config->counters[packet->direction];
 
