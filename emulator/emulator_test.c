@@ -29,6 +29,7 @@ float throttle_start[] = {0.5, 1.3, 2.5, 3.6, 5.4, 7.1, 9.6, 15};
 float throttle_end[] = {0.9, 1.8, 2.9, 4.3, 6.0, 7.9, 10.0, 17};
 
 int main(int argc, char *argv[]) {
+    char errmsg[256];
     // set random seed
     srand((u_int)time(NULL));
 
@@ -54,7 +55,8 @@ int main(int argc, char *argv[]) {
 
     emulator_add_flag(config, EMULATOR_THROTTLE);
 
-    emulator_set_throttle(config, 8, throttle_start, throttle_end);
+    emulator_set_data(config, OFFSET_THROTTLE,
+                      8, throttle_start, throttle_end);
 
     emulator_set_pid(config, pids, 1);
 
@@ -62,8 +64,10 @@ int main(int argc, char *argv[]) {
 
     emulator_set_direction(config, OFFSET_THROTTLE, DIRECTION_OUT);
 
-    if (handle->errmsg[0]) {
-        puts(handle->errmsg);
+    emulator_config_check(config, errmsg);
+
+    if (errmsg[0]) {
+        puts(errmsg);
         exit(EXIT_FAILURE);
     }
 

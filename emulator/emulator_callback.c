@@ -40,7 +40,7 @@ time_add(struct timeval *tv, double time) {
 
 static int
 check_pid_in_list(pid_t pid, pid_t *pid_list, ssize_t n) {
-    if (pid_list == NULL || n == 0) {
+    if (n == 0 || pid_list == NULL) {
         // pid_list is empty means match all
         return 1;
     }
@@ -139,9 +139,13 @@ throttle_thread_func(void *args) {
 }
 
 static double
-calc_val_by_time(float *t, float *val,
-                 ssize_t n, ssize_t *p,
-                 struct timeval *tv_start) {
+calc_val_by_time(emulator_config_t *config, int offset) {
+    float *t = config->t[offset];
+    float *val = config->val[offset];
+    ssize_t n = config->num[offset];
+    ssize_t *p = &config->idx[offset];
+    struct timeval *tv_start = &config->tv[offset];
+
     // guard here to avoid invalid memory access
     if (t == NULL || val == NULL) {
         return 0.;
@@ -174,13 +178,17 @@ calc_val_by_time(float *t, float *val,
                     (t_now - t[*p]) *
                     (val[*p + 1] - val[*p]) /
                     (t[*p + 1] - t[*p]);
-    return result;
+    return result > 0. ? result : 0.;
 }
 
 static int
 calc_rate_by_size(emulator_config_t *config,
                   size_t packet_size) {
-    for (int i = 0; i < PACKET_SIZE_LEVELS &&
+    if (config->packet_size == NULL ||
+        config->packet_rate == NULL) {
+        return 1;
+    }
+    for (int i = 0; i < config->num_size &&
                     config->packet_size[i] != -1; i++) {
         size_t prev_size = (i == 0 ? 0 : config->packet_size[i - 1]);
         if (prev_size <= packet_size &&
@@ -198,33 +206,41 @@ calc_rate_by_size(emulator_config_t *config,
 }
 
 static double
-calc_do_throttle(emulator_config_t *config) {
-    if (config->time_start == NULL ||
-        config->time_end == NULL) {
+calc_do_throttle(emulator_config_t *config, int offset) {
+    float *t1 = config->t[offset];
+    float *t2 = config->val[offset];
+    ssize_t n = config->num[offset];
+    ssize_t *p = &config->idx[offset];
+    struct timeval *tv_start = &config->tv[offset];
+
+    // guard here to avoid invalid memory access
+    if (t1 == NULL || t2 == NULL) {
         return -1.;
     }
+
     struct timeval tv;
     struct timezone tz;
     double ret_val = -1.;
     gettimeofday(&tv, &tz);
 
-    double end_time = config->time_end[config->num_throttle - 1];
-    double t_now = time_minus(&tv, &config->throttle_start);
+    double end_time = t2[n - 1];
+    double t_now = time_minus(&tv, tv_start);
     if (t_now >= end_time) {
         long k = (long)(t_now / end_time);
         // then reset it to beginning
-        time_add(&config->throttle_start, end_time * k);
+        time_add(tv_start, end_time * k);
         t_now -= end_time * k;
-        config->t_throttle = 0;
+        *p = 0;
     }
 
-    while (config->time_start[config->t_throttle] <= t_now) {
-        config->t_throttle++;
+    while (t1[*p] <= t_now) {
+        (*p)++;
     }
-    if (config->t_throttle > 0) { config->t_throttle--; }
-    if (config->time_start[config->t_throttle] <= t_now &&
-        t_now <= config->time_end[config->t_throttle]) {
-        ret_val = config->time_end[config->t_throttle];
+    if (*p > 0) { (*p)--; }
+
+    if (t1[*p] <= t_now &&
+        t_now <= t2[*p]) {
+        ret_val = t2[*p];
     }
 
     return ret_val;
@@ -239,12 +255,9 @@ init_callback_runtime_states(emulator_config_t *config) {
         struct timezone tz;
         gettimeofday(&tv, &tz);
         // copy values to all time stamps
-        config->delay_start = tv;
-        config->disorder_start = tv;
-        config->drop_start = tv;
-        config->duplicate_start = tv;
-        config->tamper_start = tv;
-        config->throttle_start = tv;
+        for (int i = 0; i < EMULATOR_EFFECTS; i++) {
+            config->tv[i] = tv;
+        }
     }
 }
 
@@ -354,13 +367,8 @@ void *emulator_thread_func(void *args) {
                     if (!(config->flags & EMULATOR_DROP)) { break; }
                     if (!check_direction(config->direction_flags,
                                          OFFSET_DROP, packet->direction)) { break; }
-                    if (calc_val_by_time(config->time_drop,
-                                         config->drop_rate,
-                                         config->num_drop,
-                                         &config->t_drop,
-                                         &config->drop_start) < rand_double()) {
-                        break;
-                    }
+                    if (calc_val_by_time(config,
+                                         OFFSET_DROP) < rand_double()) { break; }
                     // just drop this packet, skip following stage
                     // as if we did not receive this packet
                     goto discard;
@@ -375,11 +383,7 @@ void *emulator_thread_func(void *args) {
                                          OFFSET_DELAY, packet->direction)) { break; }
                     if (pqueue_is_full(config->delay_queue)) { break; }
                     // break if the delay time is too short
-                    double delay_time = calc_val_by_time(config->time_delay,
-                                                         config->delay_time,
-                                                         config->num_delay,
-                                                         &config->t_delay,
-                                                         &config->delay_start);
+                    double delay_time = calc_val_by_time(config, OFFSET_DELAY);
                     if (delay_time < FLOAT_EPS) { break; }
 
                     // calculate send time
@@ -407,11 +411,12 @@ void *emulator_thread_func(void *args) {
                     if (!(config->flags & EMULATOR_THROTTLE)) { break; }
                     if (!check_direction(config->direction_flags,
                                          OFFSET_THROTTLE, packet->direction)) { break; }
-                    if ((delay_time = calc_do_throttle(config)) < 0.) { break; }
+                    if ((delay_time = calc_do_throttle(config,
+                                                       OFFSET_THROTTLE)) < 0.) { break; }
 
                     throttle_packet_t *ptr = malloc(sizeof(throttle_packet_t));
                     ptr->packet = packet;
-                    ptr->time_send = config->throttle_start;
+                    ptr->time_send = config->tv[OFFSET_THROTTLE];
                     time_add(&ptr->time_send, delay_time);
 
                     queue_enqueue(config->throttle_queue, ptr);
@@ -426,11 +431,7 @@ void *emulator_thread_func(void *args) {
                     if (!(config->flags & EMULATOR_DISORDER)) { break; }
                     if (!check_direction(config->direction_flags,
                                          OFFSET_DISORDER, packet->direction)) { break; }
-                    if (calc_val_by_time(config->time_disorder,
-                                         config->disorder_rate,
-                                         config->num_disorder,
-                                         &config->t_disorder,
-                                         &config->disorder_start) < rand_double()) {
+                    if (calc_val_by_time(config, OFFSET_DISORDER) < rand_double()) {
                         break;
                     }
                     // check if there is empty slot in queue
@@ -440,7 +441,7 @@ void *emulator_thread_func(void *args) {
                     disorder_packet_t *ptr =
                             malloc(sizeof(disorder_packet_t));
                     ptr->packet = packet;
-                    ptr->time_send = rand() % MAX_DISORDER_NUM +
+                    ptr->time_send = rand() % config->num_disorder +
                                      config->counters[packet->direction];
 
                     // insert packet into disorder queue and finish processing
@@ -457,13 +458,7 @@ void *emulator_thread_func(void *args) {
                                          OFFSET_TAMPER, packet->direction)) { break; }
                     // only apply for packets with payload
                     if (headers.size_payload <= 0) { break; }
-                    if (calc_val_by_time(config->time_tamper,
-                                         config->tamper_rate,
-                                         config->num_tamper,
-                                         &config->t_tamper,
-                                         &config->tamper_start) < rand_double()) {
-                        break;
-                    }
+                    if (calc_val_by_time(config, OFFSET_TAMPER) < rand_double()) { break; }
                     for (int i = 0, cnt = 0;
                          i < headers.size_payload &&
                          cnt < MAX_TAMPER_BYTES; i++) {
@@ -475,8 +470,10 @@ void *emulator_thread_func(void *args) {
                     // if this is a TCP packet
                     // we should re-calculate the checksum
                     // TODO: re-checksum
-                    if (ip_data->ip_p == IPPROTO_TCP) {
-                    } else if (ip_data->ip_p == IPPROTO_UDP) {
+                    if (config->flags & EMULATOR_RECHECKSUM) {
+                        if (ip_data->ip_p == IPPROTO_TCP) {
+                        } else if (ip_data->ip_p == IPPROTO_UDP) {
+                        }
                     }
                 } while (0);
             case STAGE_DUPLICATE:
@@ -487,14 +484,10 @@ void *emulator_thread_func(void *args) {
                     if (!(config->flags & EMULATOR_DUPLICATE)) { break; }
                     if (!check_direction(config->direction_flags,
                                          OFFSET_DUPLICATE, packet->direction)) { break; }
-                    if (calc_val_by_time(config->time_duplicate,
-                                         config->duplicate_rate,
-                                         config->num_duplicate,
-                                         &config->t_duplicate,
-                                         &config->duplicate_start) < rand_double()) {
+                    if (calc_val_by_time(config, OFFSET_DUPLICATE) < rand_double()) {
                         break;
                     }
-                    int times = rand() % MAX_DUPLICATE_NUM + 1;
+                    int times = rand() % config->num_dup + 1;
                     for (int i = 0; i < times; i++) {
                         // just re-inject the packet is OK
                         divert_reinject(config->handle, ip_data, -1, sin);
@@ -568,6 +561,7 @@ void *emulator_thread_func(void *args) {
     clear_throttle_queue(config);
     clear_disorder_queue(config);
     clear_packet_queue(config);
+    config->flags &= ~((uint64_t)EMULATOR_IS_RUNNING);
     return NULL;
 }
 

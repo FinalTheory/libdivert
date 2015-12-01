@@ -15,15 +15,20 @@ enum {
     DIRECTION_UNKNOWN = 3,
 };
 
+
+#define EMULATOR_EFFECTS    6
+
 enum {
-    OFFSET_RUNNING      = 0,
-    OFFSET_DROP         = 1,
-    OFFSET_DELAY        = 2,
-    OFFSET_THROTTLE     = 3,
-    OFFSET_DISORDER     = 4,
-    OFFSET_TAMPER       = 5,
-    OFFSET_DUPLICATE    = 6,
-    OFFSET_DUMP_PCAP    = 7,
+    OFFSET_DROP         = 0,
+    OFFSET_DELAY        = 1,
+    OFFSET_THROTTLE     = 2,
+    OFFSET_DISORDER     = 3,
+    OFFSET_TAMPER       = 4,
+    OFFSET_DUPLICATE    = 5,
+
+    OFFSET_DUMP_PCAP    = 6,
+    OFFSET_RECHECKSUM   = 7,
+    OFFSET_RUNNING      = 8,
 };
 
 #define EMULATOR_DROP       (1u << OFFSET_DROP)
@@ -32,12 +37,13 @@ enum {
 #define EMULATOR_DISORDER   (1u << OFFSET_DISORDER)
 #define EMULATOR_TAMPER     (1u << OFFSET_TAMPER)
 #define EMULATOR_DUPLICATE  (1u << OFFSET_DUPLICATE)
+
 #define EMULATOR_DUMP_PCAP  (1u << OFFSET_DUMP_PCAP)
+#define EMULATOR_RECHECKSUM (1u << OFFSET_RECHECKSUM)
 // WARNING: you should not use these flags in your code
 #define EMULATOR_IS_RUNNING (1u << OFFSET_RUNNING)
 
 
-#define PACKET_SIZE_LEVELS  10
 // size of packet buffer
 #define DISORDER_BUF_SIZE   1024
 #define DELAY_BUF_SIZE      1024
@@ -50,75 +56,53 @@ enum {
 // control the tamper rate
 #define TAMPER_CONTROL      4
 #define FLOAT_EPS           (1e-7)
-typedef struct {
-    divert_t *handle;
-    uint64_t flags;
 
-    char *dump_path;
-    FILE *dump_normal;
+typedef struct {
+    divert_t *handle;               // only used in divert_reinject(), thread safe
+    uint64_t flags;                 // only in callback function and config set, safe
+
+    char *dump_path;                // only use in config set, safe
+    FILE *dump_normal;              // these are accessed after initialize, safe
     FILE *dump_unknown;
     FILE *dump_affected;
 
-    ssize_t num_pid;
+    ssize_t num_pid;                // ensured to be accessed after set
     pid_t *pid_list;
 
-    // describe packet drop
-    ssize_t num_drop;
-    ssize_t t_drop;
-    float *drop_rate;
-    float *time_drop;
-    struct timeval drop_start;
+    /*
+     * all these variables are used only in a single thread
+     * so they must be thread safe
+     */
+    ssize_t num[EMULATOR_EFFECTS];
+    ssize_t idx[EMULATOR_EFFECTS];
+    float *t[EMULATOR_EFFECTS];
+    float *val[EMULATOR_EFFECTS];
+    struct timeval tv[EMULATOR_EFFECTS];
 
-    // packet out of order
-    ssize_t num_disorder;
-    ssize_t t_disorder;
-    float *time_disorder;
-    float *disorder_rate;
-    struct timeval disorder_start;
+    size_t *packet_size;
+    float *packet_rate;
+    size_t num_size;
 
-    // packet tamper
-    ssize_t num_tamper;
-    ssize_t t_tamper;
-    float *time_tamper;
-    float *tamper_rate;
-    struct timeval tamper_start;
-
-    // packet duplicate
-    ssize_t num_duplicate;
-    ssize_t t_duplicate;
-    float *time_duplicate;
-    float *duplicate_rate;
-    struct timeval duplicate_start;
-
-    // packet lag
-    ssize_t num_delay;
-    ssize_t t_delay;
-    float *time_delay;
-    float *delay_time;
-    struct timeval delay_start;
-
-    // packet throttle
-    ssize_t num_throttle;
-    ssize_t t_throttle;
-    float *time_start;
-    float *time_end;
-    struct timeval throttle_start;
-
+    /*
+     * thread control variables
+     * of course thread safe
+     */
     pthread_t delay_thread;
     pthread_t throttle_thread;
     pthread_t emulator_thread;
 
-    size_t packet_size[PACKET_SIZE_LEVELS];
-    float packet_rate[PACKET_SIZE_LEVELS];
+    u_char direction_flags[EMULATOR_EFFECTS];
 
-    u_char direction_flags[8];
+    uint32_t num_dup;
+    uint32_t num_disorder;
+    uint64_t counters[2];
 
+    /*
+     * these are thread safe data structures
+     */
     PQueue *delay_queue;
     queue_t *throttle_queue;
     PQueue *disorder_queue;
-
-    uint64_t counters[2];
-
     circ_buf_t *packet_queue;
 } emulator_config_t;
 
@@ -159,7 +143,12 @@ void emulator_destroy_config(emulator_config_t *config);
 
 void emulator_add_flag(emulator_config_t *config, uint64_t new_flag);
 
+void emulator_clear_flags(emulator_config_t *config);
+
 void emulator_set_handle(emulator_config_t *config, divert_t *handle);
+
+void emulator_set_dump_pcap(emulator_config_t *config,
+                            char *dump_path);
 
 void emulator_set_pid(emulator_config_t *config,
                       pid_t *pid_list, ssize_t num);
@@ -167,22 +156,21 @@ void emulator_set_pid(emulator_config_t *config,
 void emulator_set_direction(emulator_config_t *config,
                             int offset, u_char val);
 
-#define EMULATOR_SET_FUNC_IFACE(NAME, ARR1, ARR2)               \
-    void emulator_set_##NAME(emulator_config_t *config,         \
-                             ssize_t num_##NAME,                \
-                             float *ARR1, float *ARR2);
+void emulator_set_packet_size_rate(emulator_config_t *config,
+                                   size_t num, size_t *size, float *rate);
 
-EMULATOR_SET_FUNC_IFACE(drop, time_drop, drop_rate)
+void emulator_set_data(emulator_config_t *config,
+                       int offset, ssize_t num,
+                       float *t, float *val);
 
-EMULATOR_SET_FUNC_IFACE(delay, time_delay, delay_time)
+void emulator_set_num_disorder(emulator_config_t *config,
+                               uint32_t num_disorder);
 
-EMULATOR_SET_FUNC_IFACE(disorder, time_disorder, disorder_rate)
+void emulator_set_num_duplicate(emulator_config_t *config,
+                                uint32_t duplicate);
 
-EMULATOR_SET_FUNC_IFACE(tamper, time_tamper, tamper_rate)
+int emulator_config_check(emulator_config_t *config, char *errmsg);
 
-EMULATOR_SET_FUNC_IFACE(duplicate, time_duplicate, duplicate_rate)
-
-EMULATOR_SET_FUNC_IFACE(throttle, time_start, time_end)
-
+int emulator_is_running(emulator_config_t *config);
 
 #endif //DIVERT_EMULATOR_CONFIG_H
