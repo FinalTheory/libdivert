@@ -145,13 +145,15 @@ void emulator_add_flag(emulator_config_t *config, uint64_t new_flag);
 
 void emulator_clear_flags(emulator_config_t *config);
 
+void emulator_clear_flag(emulator_config_t *config, uint64_t flag);
+
 void emulator_set_handle(emulator_config_t *config, divert_t *handle);
 
 void emulator_set_dump_pcap(emulator_config_t *config,
                             char *dump_path);
 
-void emulator_set_pid(emulator_config_t *config,
-                      pid_t *pid_list, ssize_t num);
+void emulator_set_pid_list(emulator_config_t *config,
+                           pid_t *pid_list, ssize_t num);
 
 void emulator_set_direction(emulator_config_t *config,
                             int offset, u_char val);

@@ -111,8 +111,8 @@ void emulator_destroy_config(emulator_config_t *config) {
     }
 }
 
-void emulator_set_pid(emulator_config_t *config,
-                      pid_t *pid_list, ssize_t num) {
+void emulator_set_pid_list(emulator_config_t *config,
+                           pid_t *pid_list, ssize_t num) {
     // copy first
     pid_t *dup_list = malloc(sizeof(pid_t) * num);
     memcpy(dup_list, pid_list, sizeof(pid_t) * num);
@@ -128,6 +128,10 @@ void emulator_add_flag(emulator_config_t *config, uint64_t new_flag) {
 
 void emulator_clear_flags(emulator_config_t *config) {
     config->flags = 0;
+}
+
+void emulator_clear_flag(emulator_config_t *config, uint64_t flag) {
+    config->flags &= ~((uint64_t)flag);
 }
 
 void emulator_set_dump_pcap(emulator_config_t *config,

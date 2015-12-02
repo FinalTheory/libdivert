@@ -58,7 +58,7 @@ int main(int argc, char *argv[]) {
     emulator_set_data(config, OFFSET_THROTTLE,
                       8, throttle_start, throttle_end);
 
-    emulator_set_pid(config, pids, 1);
+    emulator_set_pid_list(config, pids, 1);
 
     emulator_set_handle(config, handle);
 
