@@ -19,6 +19,7 @@
  * Please refer to:
  * 1. https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man4/bpf.4.html
  * 2. http://www.tcpdump.org/linktypes/LINKTYPE_PKTAP.html
+ * # this is deprecated in libdivert
  *
     +---------------------------+
     |  BPF header extended [1]  |
@@ -50,7 +51,7 @@ u_char *divert_dump_packet(u_char *packet,
     u_char *entry = packet;
 
     struct ip *ip_hdr = (struct ip *)entry;          /* define/compute ip header offset */
-    size_t size_ip = ip_hdr->ip_hl * 4u; /* size of IP header */
+    size_t size_ip = ip_hdr->ip_hl * 4u;             /* size of IP header */
 
     struct tcphdr *tcp_hdr = NULL;                   /* The TCP header */
     struct udphdr *udp_hdr = NULL;                   /* The packet payload */
@@ -124,4 +125,120 @@ u_char *divert_dump_packet(u_char *packet,
         return payload;
     }
     return NULL;
+}
+
+//! \brief Calculate the IP header checksum.
+//! \param buf The IP header content.
+//! \param hdr_len The IP header length.
+//! \return The result of the checksum.
+uint16_t ip_checksum(const void *buf, size_t hdr_len)
+{
+    unsigned long sum = 0;
+    const uint16_t *ip1;
+
+    ip1 = buf;
+    while (hdr_len > 1)
+    {
+        sum += *ip1++;
+        if (sum & 0x80000000)
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        hdr_len -= 2;
+    }
+
+    while (sum >> 16)
+        sum = (sum & 0xFFFF) + (sum >> 16);
+
+    return (uint16_t)(~sum);
+}
+
+//! \brief Calculate the TCP checksum.
+//! \param buff The TCP packet.
+//! \param len The size of the TCP packet.
+//! \param src_addr The IP source address (in network format).
+//! \param dest_addr The IP destination address (in network format).
+//! \return The result of the checksum.
+uint16_t tcp_checksum(const void *buff, size_t len,
+                      in_addr_t src_addr, in_addr_t dest_addr)
+{
+    const uint16_t *buf=buff;
+    uint16_t *ip_src=(void *)&src_addr, *ip_dst=(void *)&dest_addr;
+    uint32_t sum;
+    size_t length=len;
+
+    // Calculate the sum						//
+    sum = 0;
+    while (len > 1)
+    {
+        sum += *buf++;
+        if (sum & 0x80000000)
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        len -= 2;
+    }
+
+    if ( len & 1 )
+        // Add the padding if the packet lenght is odd		//
+        sum += *((uint8_t *)buf);
+
+    // Add the pseudo-header					//
+    sum += *(ip_src++);
+    sum += *ip_src;
+    sum += *(ip_dst++);
+    sum += *ip_dst;
+    sum += htons(IPPROTO_TCP);
+    sum += htons(length);
+
+    // Add the carries						//
+    while (sum >> 16)
+        sum = (sum & 0xFFFF) + (sum >> 16);
+
+    // Return the one's complement of sum				//
+    return ( (uint16_t)(~sum)  );
+}
+
+//! \brief
+//!	Calculate the UDP checksum (calculated with the whole
+//!	packet).
+//! \param buff The UDP packet.
+//! \param len The UDP packet length.
+//! \param src_addr The IP source address (in network format).
+//! \param dest_addr The IP destination address (in network format).
+//! \return The result of the checksum.
+uint16_t udp_checksum(const void *buff, size_t len,
+                      in_addr_t src_addr, in_addr_t dest_addr)
+{
+    const uint16_t *buf=buff;
+    uint16_t *ip_src=(void *)&src_addr, *ip_dst=(void *)&dest_addr;
+    uint32_t sum;
+    size_t length=len;
+
+    // Calculate the sum						//
+    sum = 0;
+    while (len > 1)
+    {
+        sum += *buf++;
+        if (sum & 0x80000000)
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        len -= 2;
+    }
+
+    if ( len & 1 )
+        // Add the padding if the packet lenght is odd		//
+        sum += *((uint8_t *)buf);
+
+    // Add the pseudo-header					//
+    sum += *(ip_src++);
+    sum += *ip_src;
+
+    sum += *(ip_dst++);
+    sum += *ip_dst;
+
+    sum += htons(IPPROTO_UDP);
+    sum += htons(length);
+
+    // Add the carries						//
+    while (sum >> 16)
+        sum = (sum & 0xFFFF) + (sum >> 16);
+
+    // Return the one's complement of sum				//
+    return ( (uint16_t)(~sum)  );
 }

@@ -180,6 +180,8 @@ int divert_is_inbound(struct sockaddr *sin_raw, char *interface);
 
 int divert_is_outbound(struct sockaddr *sin_raw);
 
+void divert_checksum(struct ip *ip_data);
+
 ssize_t divert_reinject(divert_t *handle, struct ip *packet,
                         ssize_t length, struct sockaddr *sin);
 

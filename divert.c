@@ -758,11 +758,42 @@ ssize_t divert_read(divert_t *handle,
     return ret_val;
 }
 
+void divert_checksum(struct ip *ip_data) {
+    size_t iphdr_len = ip_data->ip_hl * 4u;
+    size_t ip_len = ntohs(ip_data->ip_len);
+    // error packet, just return
+    if (iphdr_len >= ip_len) { return; }
+    // re-checksum TCP and UDP packets
+    if (ip_data->ip_p == IPPROTO_TCP) {
+        struct tcphdr *tcp_data = (struct tcphdr *)((u_char *)ip_data + iphdr_len);
+        tcp_data->th_sum = 0;
+        tcp_data->th_sum = tcp_checksum(tcp_data,
+                                        ip_len - iphdr_len,
+                                        ip_data->ip_src.s_addr,
+                                        ip_data->ip_dst.s_addr);
+    } else if (ip_data->ip_p == IPPROTO_UDP) {
+        struct udphdr *udp_data = (struct udphdr *)((u_char *)ip_data + iphdr_len);
+        udp_data->uh_sum = 0;
+        udp_data->uh_sum = udp_checksum(udp_data,
+                                        ip_len - iphdr_len,
+                                        ip_data->ip_src.s_addr,
+                                        ip_data->ip_dst.s_addr);
+    }
+    // need to re-checksum IP packet
+    ip_data->ip_sum = 0;
+    ip_data->ip_sum = ip_checksum(ip_data, iphdr_len);
+}
+
 ssize_t divert_reinject(divert_t *handle, struct ip *packet,
                         ssize_t length, struct sockaddr *sin) {
+    // calculate packet length
     socklen_t sin_len = sizeof(struct sockaddr);
     if (length < 0) {
         length = ntohs(((struct ip *)packet)->ip_len);
+    }
+    // re-checksum the packet
+    if (packet->ip_sum == 0) {
+        divert_checksum(packet);
     }
     ssize_t ret_val;
     do {
