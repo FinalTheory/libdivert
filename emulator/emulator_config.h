@@ -53,8 +53,7 @@ enum {
 #define MAX_DUPLICATE_NUM   4
 // max tamper bytes
 #define MAX_TAMPER_BYTES    4
-// control the tamper rate
-#define TAMPER_CONTROL      4
+
 #define FLOAT_EPS           (1e-7)
 
 typedef struct {
@@ -93,8 +92,9 @@ typedef struct {
 
     u_char direction_flags[EMULATOR_EFFECTS];
 
-    uint32_t num_dup;
-    uint32_t num_disorder;
+    uint32_t max_duplicate;
+    uint32_t max_disorder;
+    uint32_t max_tamper;
     uint64_t counters[2];
 
     /*
@@ -170,6 +170,9 @@ void emulator_set_num_disorder(emulator_config_t *config,
 
 void emulator_set_num_duplicate(emulator_config_t *config,
                                 uint32_t duplicate);
+
+void emulator_set_num_tamper(emulator_config_t *config,
+                             uint32_t tamper);
 
 int emulator_config_check(emulator_config_t *config, char *errmsg);
 

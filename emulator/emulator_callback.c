@@ -4,7 +4,6 @@
 #include "dump_packet.h"
 #include <stdlib.h>
 #include <string.h>
-#include <divert.h>
 
 
 static inline double
@@ -113,7 +112,6 @@ throttle_thread_func(void *args) {
              time_greater_than(&time_send, &time_now);
              gettimeofday(&time_now, &tz)) {
             double time_delta = time_minus(&time_send, &time_now);
-            printf("sleep %f ms\n", time_delta);
             unsigned secs = (unsigned)time_delta;
             useconds_t usecs = (useconds_t)((time_delta - (double)secs) * 1000000.);
             sleep((secs));
@@ -233,14 +231,15 @@ calc_do_throttle(emulator_config_t *config, int offset) {
         *p = 0;
     }
 
-    while (t1[*p] <= t_now) {
-        (*p)++;
-    }
-    if (*p > 0) { (*p)--; }
-
-    if (t1[*p] <= t_now &&
-        t_now <= t2[*p]) {
-        ret_val = t2[*p];
+    while (*p < n) {
+        if (t_now < t1[*p]) {
+            break;
+        } else if (t1[*p] <= t_now && t_now <= t2[*p]) {
+            ret_val = t2[*p];
+            break;
+        } else {
+            (*p)++;
+        }
     }
 
     return ret_val;
@@ -391,8 +390,6 @@ void *emulator_thread_func(void *args) {
                     struct timezone tz;
                     gettimeofday(&tv, &tz);
                     time_add(&tv, delay_time);
-                    // TODO: remove this
-                    // fprintf(stderr, "Packet delay %f ms\n", delay_time * 1000);
                     delay_packet_t *ptr = malloc(sizeof(delay_packet_t));
                     ptr->packet = packet;
                     ptr->time_send = tv;
@@ -401,7 +398,6 @@ void *emulator_thread_func(void *args) {
                     pqueue_enqueue(config->delay_queue, ptr);
                     goto hijacked;
                 } while (0);
-
             case STAGE_THROTTLE:
                 /*
                  * packet throttle stage
@@ -422,7 +418,6 @@ void *emulator_thread_func(void *args) {
                     queue_enqueue(config->throttle_queue, ptr);
                     goto hijacked;
                 } while (0);
-
             case STAGE_DISORDER:
                 /*
                  * packet disorder stage
@@ -441,7 +436,7 @@ void *emulator_thread_func(void *args) {
                     disorder_packet_t *ptr =
                             malloc(sizeof(disorder_packet_t));
                     ptr->packet = packet;
-                    ptr->time_send = rand() % config->num_disorder +
+                    ptr->time_send = rand() % config->max_disorder +
                                      config->counters[packet->direction];
 
                     // insert packet into disorder queue and finish processing
@@ -459,22 +454,18 @@ void *emulator_thread_func(void *args) {
                     // only apply for packets with payload
                     if (headers.size_payload <= 0) { break; }
                     if (calc_val_by_time(config, OFFSET_TAMPER) < rand_double()) { break; }
-                    for (int i = 0, cnt = 0;
-                         i < headers.size_payload &&
-                         cnt < MAX_TAMPER_BYTES; i++) {
-                        if (rand() % TAMPER_CONTROL == 0) {
-                            headers.payload[i] = (u_char)(rand() % 256);
-                            cnt++;
-                        }
+                    // randomly tamper some bytes of payload data
+                    int num_tamper = rand() % config->max_tamper + 1;
+                    for (int i = 0; i < num_tamper; i++) {
+                        size_t idx = rand() % headers.size_payload;
+                        headers.payload[idx] = (u_char)(rand() % 256);
                     }
-                    // if this is a TCP packet
+                    // if this is a TCP or UDP packet
                     // we should re-calculate the checksum
-                    // TODO: re-checksum
                     if (config->flags & EMULATOR_RECHECKSUM) {
-                        if (ip_data->ip_p == IPPROTO_TCP) {
-                        } else if (ip_data->ip_p == IPPROTO_UDP) {
-                        }
+                        divert_checksum(ip_data);
                     }
+                    // fallback to default
                 } while (0);
             case STAGE_DUPLICATE:
                 /*
@@ -487,15 +478,15 @@ void *emulator_thread_func(void *args) {
                     if (calc_val_by_time(config, OFFSET_DUPLICATE) < rand_double()) {
                         break;
                     }
-                    int times = rand() % config->num_dup + 1;
+                    int times = rand() % config->max_duplicate + 1;
                     for (int i = 0; i < times; i++) {
                         // just re-inject the packet is OK
                         divert_reinject(config->handle, ip_data, -1, sin);
                     }
-                    goto deliver;
+                    // fallback to default
                 } while (0);
             default:
-                break;
+                goto deliver;
         }
 
         /*
@@ -572,17 +563,6 @@ void emulator_callback(void *args, void *proc,
     proc_info_t *proc_info = proc;
     pid_t pid = proc_info->pid != -1 ?
                 proc_info->pid : proc_info->epid;
-
-    // TODO: remove this
-//    char errmsg[256];
-//    packet_hdrs_t headers;
-//    divert_dump_packet((u_char *)ip_data, &headers, errmsg);
-//    if (headers.size_payload) {
-//        for (int i = 0; i < headers.size_payload; i++) {
-//            putchar(headers.payload[i]);
-//        }
-//        puts("");
-//    }
 
     /*
      * if this packet is from unknown PID

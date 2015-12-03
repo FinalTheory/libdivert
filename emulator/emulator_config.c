@@ -1,8 +1,6 @@
 #include "emulator_config.h"
 #include "emulator_callback.h"
 #include <stdlib.h>
-#include <unistd.h>
-#include <stdlib.h>
 #include <string.h>
 
 void swap(void **a, void **b) {
@@ -55,12 +53,13 @@ throttle_free_node_func(void *p) {
 emulator_config_t *emulator_create_config() {
     emulator_config_t *config =
             calloc(sizeof(emulator_config_t), 1);
-    // capture packets for both direction by default
+    // apply effects on inbound packets by default
     for (int i = 0; i < EMULATOR_EFFECTS; i++) {
         config->direction_flags[i] = DIRECTION_IN;
     }
-    config->num_dup = MAX_DUPLICATE_NUM;
-    config->num_disorder = MAX_DISORDER_NUM;
+    config->max_duplicate = MAX_DUPLICATE_NUM;
+    config->max_disorder = MAX_DISORDER_NUM;
+    config->max_tamper = MAX_TAMPER_BYTES;
 
     config->delay_thread = (pthread_t)-1;
     config->throttle_thread = (pthread_t)-1;
@@ -106,7 +105,12 @@ void emulator_destroy_config(emulator_config_t *config) {
         pqueue_destroy(config->disorder_queue);
         queue_destroy(config->throttle_queue);
         circ_buf_destroy(config->packet_queue);
-        // TODO: free all useless pointers
+        CHECK_AND_FREE(config->packet_size)
+        CHECK_AND_FREE(config->packet_rate)
+        for (int i = 0; i < EMULATOR_EFFECTS; i++) {
+            CHECK_AND_FREE(config->t[i])
+            CHECK_AND_FREE(config->val[i])
+        }
         free(config);
     }
 }
@@ -189,20 +193,25 @@ void emulator_set_data(emulator_config_t *config,
     float *tmp_t, *tmp_val;
     MALLOC_AND_COPY(tmp_t, t, num, float)
     MALLOC_AND_COPY(tmp_val, val, num, float)
-    swap((void **)&tmp_t, (void **)&config->t[offset]);
-    swap((void **)&tmp_val, (void **)&config->val[offset]);
+    swap((void **)&tmp_t, (void **)&(config->t[offset]));
+    swap((void **)&tmp_val, (void **)&(config->val[offset]));
     CHECK_AND_FREE(tmp_t)
     CHECK_AND_FREE(tmp_val)
 }
 
 void emulator_set_num_disorder(emulator_config_t *config,
                                uint32_t num_disorder) {
-    config->num_disorder = num_disorder;
+    config->max_disorder = num_disorder;
 }
 
 void emulator_set_num_duplicate(emulator_config_t *config,
-                               uint32_t duplicate) {
-    config->num_dup = duplicate;
+                                uint32_t duplicate) {
+    config->max_duplicate = duplicate;
+}
+
+void emulator_set_num_tamper(emulator_config_t *config,
+                             uint32_t tamper) {
+    config->max_tamper = tamper;
 }
 
 int emulator_is_running(emulator_config_t *config) {
