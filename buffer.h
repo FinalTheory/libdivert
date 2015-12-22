@@ -36,6 +36,8 @@ int circ_buf_is_empty(circ_buf_t *sp);
 
 void circ_buf_insert(circ_buf_t *sp, void *item);
 
+void *circ_buf_head(circ_buf_t *sp);
+
 void *circ_buf_remove(circ_buf_t *sp);
 
 void circ_buf_wait_until(circ_buf_t *sp,

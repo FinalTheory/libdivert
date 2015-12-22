@@ -1,7 +1,7 @@
-#include "emulator_config.h"
-#include "emulator_callback.h"
-#include <stdlib.h>
+#include "emulator.h"
+#include "delay.h"
 #include <libproc.h>
+#include "divert_ipfw.h"
 
 #define DATA_LEN 200
 
@@ -56,35 +56,17 @@ int main(int argc, char *argv[]) {
     // not using any flag, just divert all packets
     divert_t *handle = divert_create(0, 0u);
 
-    emulator_config_t *config = emulator_create_config();
+    emulator_config_t *config =
+            emulator_create_config(handle, 4096);
 
-    emulator_set_handle(config, handle);
+    pipe_node_t *delay_pipe =
+            delay_pipe_create(DATA_LEN, t, delay_time, DIRECTION_IN, 65535);
 
     emulator_set_pid_list(config, pids, 1);
 
-    emulator_set_data(config, OFFSET_DROP,
-                      DATA_LEN, t, drop_rate);
-
-    emulator_set_data(config, OFFSET_DELAY,
-                      DATA_LEN, t, delay_time);
-
-    emulator_set_data(config, OFFSET_THROTTLE,
-                      8, throttle_start, throttle_end);
-
-    emulator_set_data(config, OFFSET_DISORDER,
-                      DATA_LEN, t, disorder_rate);
-
-    emulator_set_data(config, OFFSET_TAMPER,
-                      DATA_LEN, t, tamper_rate);
-
-    emulator_set_data(config, OFFSET_DUPLICATE,
-                      DATA_LEN, t, duplicate_rate);
-
     emulator_add_flag(config, EMULATOR_RECHECKSUM);
 
-    emulator_add_flag(config, EMULATOR_THROTTLE);
-
-    //emulator_add_flag(config, EMULATOR_DELAY);
+    emulator_add_pipe(config, delay_pipe);
 
     if (emulator_config_check(config, errmsg)) {
         puts(errmsg);
@@ -124,5 +106,6 @@ int main(int argc, char *argv[]) {
     if (divert_close(handle) == 0) {
         puts("Successfully cleaned, exit.");
     }
+    ipfw_flush(errmsg);
     return 0;
 }

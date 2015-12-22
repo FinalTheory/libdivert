@@ -1,6 +1,8 @@
 #include "buffer.h"
 #include <stdlib.h>
 
+// TODO: 给这堆东西增加无锁版本!!!
+
 
 inline static void
 free_all_memory(circ_buf_t *sp) {
@@ -79,6 +81,18 @@ void circ_buf_insert(circ_buf_t *sp, void *item) {
     sp->size++;
     pthread_cond_signal(&sp->UntilNotEmpty);
     pthread_mutex_unlock(&sp->mutex);                    /* Unlock the buffer */
+}
+
+/* Only return the first item from buffer sp */
+void *circ_buf_head(circ_buf_t *sp) {
+    void *item;
+    pthread_mutex_lock(&sp->mutex);                       /* Lock the buffer */
+    while (sp->size < 1) {
+        pthread_cond_wait(&sp->UntilNotEmpty, &sp->mutex);
+    }
+    item = sp->buffer[(sp->front + 1) % (sp->capacity)];  /* Get the item */
+    pthread_mutex_unlock(&sp->mutex);                     /* Unlock the buffer */
+    return item;
 }
 
 /* Remove and return the first item from buffer sp */
