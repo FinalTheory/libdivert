@@ -19,7 +19,7 @@ disorder_pipe_insert(pipe_node_t *node,
                           emulator_packet_t *packet) {
     disorder_pipe_t *pipe = container_of(node, disorder_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
-    
+
     do {
         // do not process this packet if this is a timeout signal
         if (packet->label != NEW_PACKET) { break; }
