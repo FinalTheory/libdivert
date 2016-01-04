@@ -2,29 +2,32 @@
 #include "emulator.h"
 
 
-void biterr_pipe_insert(pipe_node_t *node,
-                        emulator_packet_t *packet) {
+static void
+biterr_pipe_insert(pipe_node_t *node,
+                   emulator_packet_t *packet) {
     biterr_pipe_t *pipe = container_of(node, biterr_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
     /*
-                 * packet tamper stage
-                 */
+     * packet bit error pipe
+     */
     do {
         if (packet->label != NEW_PACKET) { break; }
         emulator_config_t *config = node->config;
-        int num_flip = 0;
+
         if (!check_direction(node->direction,
                              packet->direction)) { break; }
         // only apply for packets with payload
         if (packet->headers.size_payload <= 0) { break; }
-        if ((num_flip = (int)
-                calc_val_by_time(pipe->t,
-                                 pipe->err_exp,
-                                 node->num, &node->p,
-                                 &node->tv_start)) < 1) { break; }
+        if (calc_val_by_time(pipe->t,
+                             pipe->biterr_rate,
+                             node->num, &node->p,
+                             &node->tv_start) < rand_double()) { break; }
+
+        int num_flip = rand() % pipe->max_flip + 1;
         // randomly flip some bits of payload data
         for (int i = 0; i < num_flip; i++) {
+            // is this implement correct?
             size_t idx = rand() %
                          (packet->headers.size_payload * BITS_PER_BYTE);
             packet->headers.payload[idx / BITS_PER_BYTE]
@@ -36,11 +39,30 @@ void biterr_pipe_insert(pipe_node_t *node,
             divert_checksum(packet->ip_data);
         }
         next_pipe_insert(node->next, packet);
+        return;
     } while (0);
 
     next_pipe_insert(node->next, packet);
 }
 
-void biterr_pipe_process(pipe_node_t *node) {
-    // still do nothing here
+pipe_node_t *biterr_pipe_create(size_t num, float *t,
+                                float *flip_num,
+                                int direction, int max_flip) {
+    biterr_pipe_t *pipe = calloc(1, sizeof(biterr_pipe_t));
+    pipe_node_t *node = &pipe->node;
+
+    pipe->t = t;
+    pipe->biterr_rate = flip_num;
+    pipe->max_flip = max_flip;
+
+    node->pipe_type = PIPE_BITERR;
+    node->insert = biterr_pipe_insert;
+    node->process = NULL;
+    node->clear = NULL;
+
+    node->p = 0;
+    node->num = num;
+    node->direction = direction;
+
+    return node;
 }

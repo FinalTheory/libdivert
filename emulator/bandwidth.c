@@ -101,7 +101,7 @@ pipe_node_t *bandwidth_pipe_create(size_t num, float *t,
     pipe->bandwidth = bandwidth;
     pipe->buffer = circ_buf_create(queue_size);
 
-    node->pipe_type = PIPE_REINJECT;
+    node->pipe_type = PIPE_BANDWIDTH;
     node->process = bandwidth_pipe_process;
     node->insert = bandwidth_pipe_insert;
     node->clear = bandwidth_pipe_clear;

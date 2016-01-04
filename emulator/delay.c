@@ -113,7 +113,7 @@ pipe_node_t *delay_pipe_create(size_t num, float *t,
     pipe->delay_time = delay_time;
     pipe->delay_queue = pqueue_new(cmp_delay_packet, queue_size);
 
-    node->pipe_type = PIPE_REINJECT;
+    node->pipe_type = PIPE_DELAY;
     node->process = delay_pipe_process;
     node->insert = delay_pipe_insert;
     node->clear = delay_pipe_clear;

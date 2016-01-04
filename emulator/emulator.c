@@ -208,15 +208,15 @@ void *emulator_thread_func(void *args) {
         if (calc_rate_by_size(config, packet->headers.size_payload)) {
             // insert packet into first pipe
             config->pipe->insert(config->pipe, packet);
-            // process each pipe
+            // process each pipe if it has process function
             for (node = config->pipe; node;
-                 node = node->next) {
+                 node = node->next)
+                if (NULL != node->process) {
                 node->process(node);
             }
         } else {
-            // if not, just
+            // if not, just insert it into exit pipe (re-inject)
             config->exit_pipe->insert(config->exit_pipe, packet);
-            config->exit_pipe->process(config->exit_pipe);
         }
     }
 

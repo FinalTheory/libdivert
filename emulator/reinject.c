@@ -22,12 +22,6 @@ reinject_pipe_insert(pipe_node_t *node,
     CHECK_AND_FREE(packet)
 }
 
-static void
-reinject_pipe_process(pipe_node_t *node) {
-    // nothing here
-    // packets are already re-injected into TCP stack
-}
-
 pipe_node_t *reinject_pipe_create(divert_t *handle) {
     reinject_pipe_t *pipe = calloc(1, sizeof(reinject_pipe_t));
     pipe_node_t *node = &pipe->node;
@@ -35,8 +29,8 @@ pipe_node_t *reinject_pipe_create(divert_t *handle) {
     pipe->handle = handle;
 
     node->pipe_type = PIPE_REINJECT;
-    node->process = reinject_pipe_process;
     node->insert = reinject_pipe_insert;
+    node->process = NULL;
     node->clear = NULL;
     node->direction = DIRECTION_BOTH;
 
