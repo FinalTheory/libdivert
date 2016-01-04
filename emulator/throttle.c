@@ -1,5 +1,6 @@
 #include "throttle.h"
 
+
 static double
 calc_do_throttle(float *t1, float *t2,
                  ssize_t n, ssize_t *p,
@@ -39,16 +40,15 @@ calc_do_throttle(float *t1, float *t2,
     return ret_val;
 }
 
-void throttle_pipe_insert(pipe_node_t *node,
-                          emulator_packet_t *packet) {
-    /*
-     * packet throttle stage
-     */
+static void
+throttle_pipe_insert(pipe_node_t *node,
+                     emulator_packet_t *packet) {
     throttle_pipe_t *pipe = container_of(node, throttle_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
+
     do {
-        if (packet->label != NEW_PACKET) { break; }
         double delay_time;
+        if (packet->label != NEW_PACKET) { break; }
         if (!check_direction(node->direction,
                              packet->direction)) { break; }
         if ((delay_time = calc_do_throttle(pipe->t_start,
@@ -69,7 +69,8 @@ void throttle_pipe_insert(pipe_node_t *node,
     next_pipe_insert(node->next, packet);
 }
 
-void throttle_pipe_process(pipe_node_t *node) {
+static void
+throttle_pipe_process(pipe_node_t *node) {
     throttle_pipe_t *pipe = container_of(node, throttle_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -85,6 +86,7 @@ void throttle_pipe_process(pipe_node_t *node) {
         if (time_greater_than(&ptr->time_send, &time_now)) {
             if (!ptr->is_registered) {
                 register_timer(node, &ptr->time_send, TIMEOUT_EVENT);
+                printf("sleep for %.2f ms\n", time_minus(&ptr->time_send, &time_now));
                 ptr->is_registered = 1;
             }
             break;
@@ -94,4 +96,42 @@ void throttle_pipe_process(pipe_node_t *node) {
         next_pipe_insert(node->next, ptr->packet);
         CHECK_AND_FREE(ptr)
     }
+}
+
+static void
+throttle_pipe_clear(pipe_node_t *node) {
+    throttle_pipe_t *pipe = container_of(node, throttle_pipe_t, node);
+    pipe_insert_func_t next_pipe_insert = node->next->insert;
+
+    // send out all timeout packets
+    while (circ_buf_size(pipe->throttle_queue) > 0) {
+        throttle_packet_t *ptr = circ_buf_remove(pipe->throttle_queue);
+        next_pipe_insert(node->next, ptr->packet);
+        CHECK_AND_FREE(ptr)
+    }
+}
+
+pipe_node_t *
+throttle_pipe_create(size_t num,
+                     float *t_start,
+                     float *t_end,
+                     int direction,
+                     size_t queue_size) {
+    throttle_pipe_t *pipe = calloc(1, sizeof(throttle_pipe_t));
+    pipe_node_t *node = &pipe->node;
+
+    pipe->t_start = t_start;
+    pipe->t_end = t_end;
+    pipe->throttle_queue = circ_buf_create(queue_size);
+
+    node->pipe_type = PIPE_THROTTLE;
+    node->insert = throttle_pipe_insert;
+    node->process = throttle_pipe_process;
+    node->clear = throttle_pipe_clear;
+
+    node->p = 0;
+    node->num = num;
+    node->direction = direction;
+
+    return node;
 }
