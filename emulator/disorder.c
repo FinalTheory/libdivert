@@ -1,5 +1,6 @@
 #include "disorder.h"
 
+
 static int
 cmp_disorder_packet(const void *x, const void *y) {
     const disorder_packet_t *a = x;
@@ -13,39 +14,36 @@ cmp_disorder_packet(const void *x, const void *y) {
     }
 }
 
-void disorder_pipe_insert(pipe_node_t *node,
+static void
+disorder_pipe_insert(pipe_node_t *node,
                           emulator_packet_t *packet) {
     disorder_pipe_t *pipe = container_of(node, disorder_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
-
-    /*
-     * packet disorder stage
-     */
+    
     do {
-        // do not process this packet if this is a signal
+        // do not process this packet if this is a timeout signal
         if (packet->label != NEW_PACKET) { break; }
-
-        // first update packet counter
+        // check if packet direction is legal
+        if (packet->direction == DIRECTION_UNKNOWN) { break; }
+        // update packet counter
         pipe->packet_cnt[packet->direction]++;
-        PQueue *disorder_queue = pipe->disorder_queue[packet->direction];
-
+        // then check direction
         if (!check_direction(node->direction,
                              packet->direction)) { break; }
+        // calculate rate
         if (calc_val_by_time(pipe->t,
                              pipe->disorder_rate,
                              node->num, &node->p,
-                             &node->tv_start) < rand_double()) {
-            break;
-        }
+                             &node->tv_start) < rand_double()) { break; }
+        // get the corresponding packet queue
+        PQueue *disorder_queue = pipe->disorder_queue[packet->direction];
         // check if there is empty slot in queue
         if (pqueue_is_full(disorder_queue)) { break; }
-        // check if this is a known direction
-        if (packet->direction == DIRECTION_UNKNOWN) { break; }
 
         disorder_packet_t *ptr =
                 malloc(sizeof(disorder_packet_t));
         ptr->packet = packet;
-        ptr->time_send = rand() % pipe->max_disorder +
+        ptr->time_send = (rand() % pipe->max_disorder + 1) +
                          pipe->packet_cnt[packet->direction];
 
         // insert packet into disorder queue and finish processing
@@ -55,7 +53,8 @@ void disorder_pipe_insert(pipe_node_t *node,
     next_pipe_insert(node->next, packet);
 }
 
-void disorder_pipe_process(pipe_node_t *node) {
+static void
+disorder_pipe_process(pipe_node_t *node) {
     disorder_pipe_t *pipe = container_of(node, disorder_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -74,4 +73,49 @@ void disorder_pipe_process(pipe_node_t *node) {
             CHECK_AND_FREE(ptr)
         }
     }
+}
+
+static void
+disorder_pipe_clear(pipe_node_t *node) {
+    disorder_pipe_t *pipe = container_of(node, disorder_pipe_t, node);
+    pipe_insert_func_t next_pipe_insert = node->next->insert;
+
+    for (int q = 0; q < 2; q++) {
+        PQueue *disorder_queue =
+                pipe->disorder_queue[q];
+        while (pqueue_size(disorder_queue) > 0) {
+            disorder_packet_t *ptr = pqueue_dequeue(disorder_queue);
+            next_pipe_insert(node->next, ptr->packet);
+            CHECK_AND_FREE(ptr)
+        }
+    }
+}
+
+pipe_node_t *
+disorder_pipe_create(size_t num, float *t,
+                     float *disorder_rate,
+                     int direction,
+                     size_t queue_size,
+                     int max_disorder) {
+    disorder_pipe_t *pipe = calloc(1, sizeof(disorder_pipe_t));
+    pipe_node_t *node = &pipe->node;
+
+    pipe->t = t;
+    pipe->disorder_rate = disorder_rate;
+    pipe->disorder_queue[0] = pqueue_new(cmp_disorder_packet, queue_size);
+    pipe->disorder_queue[1] = pqueue_new(cmp_disorder_packet, queue_size);
+    pipe->packet_cnt[0] = 0;
+    pipe->packet_cnt[1] = 0;
+    pipe->max_disorder = max_disorder;
+
+    node->pipe_type = PIPE_DISORDER;
+    node->process = disorder_pipe_process;
+    node->insert = disorder_pipe_insert;
+    node->clear = disorder_pipe_clear;
+
+    node->p = 0;
+    node->num = num;
+    node->direction = direction;
+
+    return node;
 }

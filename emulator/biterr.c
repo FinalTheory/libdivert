@@ -46,13 +46,13 @@ biterr_pipe_insert(pipe_node_t *node,
 }
 
 pipe_node_t *biterr_pipe_create(size_t num, float *t,
-                                float *flip_num,
+                                float *biterr_rate,
                                 int direction, int max_flip) {
     biterr_pipe_t *pipe = calloc(1, sizeof(biterr_pipe_t));
     pipe_node_t *node = &pipe->node;
 
     pipe->t = t;
-    pipe->biterr_rate = flip_num;
+    pipe->biterr_rate = biterr_rate;
     pipe->max_flip = max_flip;
 
     node->pipe_type = PIPE_BITERR;
