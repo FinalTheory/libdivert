@@ -1,11 +1,9 @@
 #include "drop.h"
 
 
-void drop_pipe_insert(pipe_node_t *node,
+static void
+drop_pipe_insert(pipe_node_t *node,
                       emulator_packet_t *packet) {
-    /*
-     * packet drop stage
-    */
     drop_pipe_t *pipe = container_of(node, drop_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -26,6 +24,24 @@ void drop_pipe_insert(pipe_node_t *node,
     next_pipe_insert(node->next, packet);
 }
 
-void drop_pipe_process(pipe_node_t *node) {
-    // do nothing here
+pipe_node_t *
+drop_pipe_create(size_t num, float *t,
+                 float *drop_rate,
+                 int direction) {
+    drop_pipe_t *pipe = calloc(1, sizeof(drop_pipe_t));
+    pipe_node_t *node = &pipe->node;
+
+    pipe->t = t;
+    pipe->drop_rate = drop_rate;
+
+    node->pipe_type = PIPE_DROP;
+    node->insert = drop_pipe_insert;
+    node->process = NULL;
+    node->clear = NULL;
+
+    node->p = 0;
+    node->num = num;
+    node->direction = direction;
+
+    return node;
 }
