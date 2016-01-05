@@ -32,8 +32,8 @@ delay_pipe_insert(pipe_node_t *node,
     do {
         if (packet->label != NEW_PACKET) { break; }
 
-        if (!check_direction(node->direction,
-                             packet->direction)) { break; }
+        if (!is_effect_applied(node->size_filter,
+                               packet->headers.size_payload)) { break; }
         if (pqueue_is_full(pipe->delay_queue)) { break; }
         // break if the delay time is too short
         double delay_time = calc_val_by_time(pipe->t,
@@ -102,9 +102,9 @@ delay_pipe_clear(pipe_node_t *node) {
     }
 }
 
-pipe_node_t *delay_pipe_create(size_t num, float *t,
+pipe_node_t *delay_pipe_create(packet_size_filter *filter,
+                               size_t num, float *t,
                                float *delay_time,
-                               int direction,
                                size_t queue_size) {
     delay_pipe_t *pipe = calloc(1, sizeof(delay_pipe_t));
     pipe_node_t *node = &pipe->node;
@@ -120,7 +120,7 @@ pipe_node_t *delay_pipe_create(size_t num, float *t,
 
     node->p = 0;
     node->num = num;
-    node->direction = direction;
+    node->size_filter = filter;
 
     return node;
 }

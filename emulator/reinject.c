@@ -32,7 +32,7 @@ pipe_node_t *reinject_pipe_create(divert_t *handle) {
     node->insert = reinject_pipe_insert;
     node->process = NULL;
     node->clear = NULL;
-    node->direction = DIRECTION_BOTH;
+    node->size_filter = NULL;
 
     return node;
 }

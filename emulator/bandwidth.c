@@ -1,4 +1,3 @@
-#include "emulator.h"
 #include "bandwidth.h"
 
 
@@ -11,8 +10,8 @@ bandwidth_pipe_insert(pipe_node_t *node,
 
     do {
         if (packet->label != NEW_PACKET) { break; }
-        if (!check_direction(node->direction,
-                             packet->direction)) { break; }
+        if (!is_effect_applied(node->size_filter,
+                               packet->headers.size_payload)) { break; }
         // if buffer is full, just drop this packet
         if (circ_buf_is_full(pipe->buffer)) {
             CHECK_AND_FREE(packet->ip_data)
@@ -87,9 +86,9 @@ bandwidth_pipe_clear(pipe_node_t *node) {
     }
 }
 
-pipe_node_t *bandwidth_pipe_create(size_t num, float *t,
+pipe_node_t *bandwidth_pipe_create(packet_size_filter *filter,
+                                   size_t num, float *t,
                                    float *bandwidth,
-                                   int direction,
                                    size_t queue_size) {
     bandwidth_pipe_t *pipe = calloc(1, sizeof(bandwidth_pipe_t));
     pipe_node_t *node = &pipe->node;
@@ -108,7 +107,7 @@ pipe_node_t *bandwidth_pipe_create(size_t num, float *t,
 
     node->p = 0;
     node->num = num;
-    node->direction = direction;
+    node->size_filter = filter;
 
     return node;
 }

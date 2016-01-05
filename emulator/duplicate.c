@@ -13,8 +13,8 @@ duplicate_pipe_insert(pipe_node_t *node,
      */
     do {
         if (packet->label != NEW_PACKET) { break; }
-        if (!check_direction(node->direction,
-                             packet->direction)) { break; }
+        if (!is_effect_applied(node->size_filter,
+                               packet->headers.size_payload)) { break; }
         if (calc_val_by_time(pipe->t,
                              pipe->dup_rate,
                              node->num, &node->p,
@@ -34,9 +34,9 @@ duplicate_pipe_insert(pipe_node_t *node,
 }
 
 pipe_node_t *
-duplicate_pipe_create(size_t num, float *t,
+duplicate_pipe_create(packet_size_filter *filter,
+                      size_t num, float *t,
                       float *dup_rate,
-                      int direction,
                       size_t max_duplicate) {
     duplicate_pipe_t *pipe = calloc(1, sizeof(duplicate_pipe_t));
     pipe_node_t *node = &pipe->node;
@@ -52,7 +52,7 @@ duplicate_pipe_create(size_t num, float *t,
 
     node->p = 0;
     node->num = num;
-    node->direction = direction;
+    node->size_filter = filter;
 
     return node;
 }

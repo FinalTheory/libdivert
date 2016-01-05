@@ -27,9 +27,9 @@ disorder_pipe_insert(pipe_node_t *node,
         if (packet->direction == DIRECTION_UNKNOWN) { break; }
         // update packet counter
         pipe->packet_cnt[packet->direction]++;
-        // then check direction
-        if (!check_direction(node->direction,
-                             packet->direction)) { break; }
+        // then check packet size
+        if (!is_effect_applied(node->size_filter,
+                               packet->headers.size_payload)) { break; }
         // calculate rate
         if (calc_val_by_time(pipe->t,
                              pipe->disorder_rate,
@@ -92,9 +92,9 @@ disorder_pipe_clear(pipe_node_t *node) {
 }
 
 pipe_node_t *
-disorder_pipe_create(size_t num, float *t,
+disorder_pipe_create(packet_size_filter *filter,
+                     size_t num, float *t,
                      float *disorder_rate,
-                     int direction,
                      size_t queue_size,
                      int max_disorder) {
     disorder_pipe_t *pipe = calloc(1, sizeof(disorder_pipe_t));
@@ -115,7 +115,7 @@ disorder_pipe_create(size_t num, float *t,
 
     node->p = 0;
     node->num = num;
-    node->direction = direction;
+    node->size_filter = filter;
 
     return node;
 }

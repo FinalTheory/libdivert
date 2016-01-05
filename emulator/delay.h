@@ -16,9 +16,9 @@ typedef struct {
     u_char is_registered;
 } delay_packet_t;
 
-pipe_node_t *delay_pipe_create(size_t num, float *t,
+pipe_node_t *delay_pipe_create(packet_size_filter *filter,
+                               size_t num, float *t,
                                float *delay_time,
-                               int direction,
                                size_t queue_size);
 
 #endif //DIVERT_DELAY_H

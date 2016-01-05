@@ -15,10 +15,10 @@ typedef struct {
 } throttle_pipe_t;
 
 pipe_node_t *
-throttle_pipe_create(size_t num,
+throttle_pipe_create(packet_size_filter *filter,
+                     size_t num,
                      float *t_start,
                      float *t_end,
-                     int direction,
                      size_t queue_size);
 
 #endif //DIVERT_THROTTLE_H

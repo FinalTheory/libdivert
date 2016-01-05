@@ -11,8 +11,8 @@ typedef struct {
 } drop_pipe_t;
 
 pipe_node_t *
-drop_pipe_create(size_t num, float *t,
-                 float *drop_rate,
-                 int direction);
+drop_pipe_create(packet_size_filter *filter,
+                 size_t num, float *t,
+                 float *drop_rate);
 
 #endif //DIVERT_DROP_H

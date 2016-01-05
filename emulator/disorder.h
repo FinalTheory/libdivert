@@ -19,9 +19,9 @@ typedef struct {
 } disorder_pipe_t;
 
 pipe_node_t *
-disorder_pipe_create(size_t num, float *t,
+disorder_pipe_create(packet_size_filter *filter,
+                     size_t num, float *t,
                      float *disorder_rate,
-                     int direction,
                      size_t queue_size,
                      int max_disorder);
 

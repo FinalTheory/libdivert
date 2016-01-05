@@ -49,8 +49,8 @@ throttle_pipe_insert(pipe_node_t *node,
     do {
         double delay_time;
         if (packet->label != NEW_PACKET) { break; }
-        if (!check_direction(node->direction,
-                             packet->direction)) { break; }
+        if (!is_effect_applied(node->size_filter,
+                               packet->headers.size_payload)) { break; }
         if ((delay_time = calc_do_throttle(pipe->t_start,
                                            pipe->t_end,
                                            node->num, &node->p,
@@ -86,7 +86,6 @@ throttle_pipe_process(pipe_node_t *node) {
         if (time_greater_than(&ptr->time_send, &time_now)) {
             if (!ptr->is_registered) {
                 register_timer(node, &ptr->time_send, TIMEOUT_EVENT);
-                printf("sleep for %.2f ms\n", time_minus(&ptr->time_send, &time_now));
                 ptr->is_registered = 1;
             }
             break;
@@ -112,10 +111,10 @@ throttle_pipe_clear(pipe_node_t *node) {
 }
 
 pipe_node_t *
-throttle_pipe_create(size_t num,
+throttle_pipe_create(packet_size_filter *filter,
+                     size_t num,
                      float *t_start,
                      float *t_end,
-                     int direction,
                      size_t queue_size) {
     throttle_pipe_t *pipe = calloc(1, sizeof(throttle_pipe_t));
     pipe_node_t *node = &pipe->node;
@@ -131,7 +130,7 @@ throttle_pipe_create(size_t num,
 
     node->p = 0;
     node->num = num;
-    node->direction = direction;
+    node->size_filter = filter;
 
     return node;
 }

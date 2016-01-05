@@ -13,8 +13,7 @@
 enum {
     DIRECTION_IN = 0,
     DIRECTION_OUT = 1,
-    DIRECTION_BOTH = 2,
-    DIRECTION_UNKNOWN = 3,
+    DIRECTION_UNKNOWN = 2,
 };
 
 enum {
@@ -90,6 +89,12 @@ typedef void (*pipe_process_func_t)(pipe_node_t *node);
 
 typedef pipe_process_func_t pipe_clear_func_t;
 
+typedef struct {
+    size_t *size;
+    float *rate;
+    size_t num;
+} packet_size_filter;
+
 struct pipe_node {
     /*
      * init when create
@@ -99,9 +104,9 @@ struct pipe_node {
     pipe_process_func_t process;
     pipe_clear_func_t clear;
 
-    int direction;
     ssize_t p;
     ssize_t num;
+    packet_size_filter *size_filter;
 
     /*
      * init when insert
@@ -138,13 +143,6 @@ struct emulator {
     pid_t *pid_list;
 
     /*
-     * initialized by emulator_rate_by_size()
-     */
-    size_t *packet_size;
-    float *packet_rate;
-    size_t num_size;
-
-    /*
      * thread control variables
      * initialized in emulator_create_config()
      * and emulator_thread_func()
@@ -156,7 +154,7 @@ struct emulator {
      * first node of processing pipes
      * and a exit pipe
      */
-    pipe_node_t *pipe;
+    pipe_node_t *pipe[2];
     pipe_node_t *exit_pipe;
 
     /*
@@ -192,7 +190,8 @@ calc_val_by_time(float *t, float *val,
 
 void time_add(struct timeval *tv, double time);
 
-int check_direction(int config_direction, int direction);
+int is_effect_applied(packet_size_filter *filter,
+                      size_t real_size);
 
 
 /*
@@ -213,7 +212,8 @@ emulator_config_t
 
 void emulator_destroy_config(emulator_config_t *config);
 
-int emulator_add_pipe(emulator_config_t *config, pipe_node_t *node);
+int emulator_add_pipe(emulator_config_t *config,
+                      pipe_node_t *node, int direction);
 
 int emulator_del_pipe(emulator_config_t *config, pipe_node_t *node);
 
@@ -228,9 +228,6 @@ void emulator_set_dump_pcap(emulator_config_t *config,
 
 void emulator_set_pid_list(emulator_config_t *config,
                            pid_t *pid_list, ssize_t num);
-
-void emulator_rate_by_size(emulator_config_t *config,
-                           size_t num, size_t *size, float *rate);
 
 int emulator_config_check(emulator_config_t *config, char *errmsg);
 

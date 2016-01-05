@@ -9,8 +9,8 @@ drop_pipe_insert(pipe_node_t *node,
 
     do {
         if (packet->label != NEW_PACKET) { break; }
-        if (!check_direction(node->direction,
-                             packet->direction)) { break; }
+        if (!is_effect_applied(node->size_filter,
+                               packet->headers.size_payload)) { break; }
         if (calc_val_by_time(pipe->t,
                              pipe->drop_rate,
                              node->num, &node->p,
@@ -25,9 +25,9 @@ drop_pipe_insert(pipe_node_t *node,
 }
 
 pipe_node_t *
-drop_pipe_create(size_t num, float *t,
-                 float *drop_rate,
-                 int direction) {
+drop_pipe_create(packet_size_filter *filter,
+                 size_t num, float *t,
+                 float *drop_rate) {
     drop_pipe_t *pipe = calloc(1, sizeof(drop_pipe_t));
     pipe_node_t *node = &pipe->node;
 
@@ -41,7 +41,7 @@ drop_pipe_create(size_t num, float *t,
 
     node->p = 0;
     node->num = num;
-    node->direction = direction;
+    node->size_filter = filter;
 
     return node;
 }

@@ -15,9 +15,9 @@ typedef struct {
 typedef delay_packet_t bandwidth_packet_t;
 
 pipe_node_t *
-bandwidth_pipe_create(size_t num, float *t,
-                      float *bandwidth,
-                      int direction,
-                      size_t queue_size);
+bandwidth_pipe_create(packet_size_filter *filter,
+                           size_t num, float *t,
+                           float *bandwidth,
+                           size_t queue_size);
 
 #endif //DIVERT_BANDWIDTH_H

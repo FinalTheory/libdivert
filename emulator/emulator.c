@@ -44,16 +44,6 @@ time_add(struct timeval *tv, double time) {
     }
 }
 
-
-inline int
-check_direction(int config_direction, int direction) {
-    if (config_direction == DIRECTION_BOTH ||
-        config_direction == direction) {
-        return 1;
-    }
-    return 0;
-}
-
 inline double
 calc_val_by_time(float *t, float *val,
                  ssize_t n, ssize_t *p,
@@ -107,19 +97,20 @@ check_pid_in_list(pid_t pid, pid_t *pid_list, ssize_t n) {
     return 0;
 }
 
-inline static int
-calc_rate_by_size(emulator_config_t *config,
-                  size_t packet_size) {
-    if (config->packet_size == NULL ||
-        config->packet_rate == NULL) {
+int is_effect_applied(packet_size_filter *filter,
+                      size_t real_size) {
+    // if not configured, apply the effects
+    if (filter == NULL ||
+        filter->size == NULL ||
+        filter->rate == NULL) {
         return 1;
     }
-    for (int i = 0; i < config->num_size &&
-                    config->packet_size[i] != -1; i++) {
-        size_t prev_size = (i == 0 ? 0 : config->packet_size[i - 1]);
-        if (prev_size <= packet_size &&
-            packet_size < config->packet_size[i]) {
-            double rate = config->packet_rate[i];
+    for (int i = 0; i < filter->num &&
+                    filter->size[i] != -1; i++) {
+        size_t prev_size = (i == 0 ? 0 : filter->size[i - 1]);
+        if (prev_size <= real_size &&
+            real_size < filter->size[i]) {
+            double rate = filter->rate[i];
             if (rand_double() < rate) {
                 return 1;
             } else {
@@ -140,9 +131,11 @@ init_callback_runtime_states(emulator_config_t *config) {
         struct timezone tz;
         gettimeofday(&tv, &tz);
         // copy values to all time stamps
-        for (pipe_node_t *ptr = config->pipe;
-             ptr; ptr = ptr->next) {
-            ptr->tv_start = tv;
+        for (int dir = 0; dir < 2; dir++) {
+            for (pipe_node_t *ptr = config->pipe[dir];
+                 ptr; ptr = ptr->next) {
+                ptr->tv_start = tv;
+            }
         }
     }
 }
@@ -204,27 +197,30 @@ void *emulator_thread_func(void *args) {
         // check if this is a quit signal
         if (packet->label == EVENT_QUIT) { break; }
 
-        // if we should apply all pipes on this packet
-        if (calc_rate_by_size(config, packet->headers.size_payload)) {
+        // check direction of this packet
+        if (packet->direction != DIRECTION_UNKNOWN) {
+            int dir = packet->direction;
             // insert packet into first pipe
-            config->pipe->insert(config->pipe, packet);
+            config->pipe[dir]->insert(config->pipe[dir], packet);
             // process each pipe if it has process function
-            for (node = config->pipe; node;
+            for (node = config->pipe[dir]; node;
                  node = node->next)
                 if (NULL != node->process) {
-                node->process(node);
-            }
+                    node->process(node);
+                }
         } else {
-            // if not, just insert it into exit pipe (re-inject)
+            // for packet with unknown direction, just re-inject it
             config->exit_pipe->insert(config->exit_pipe, packet);
         }
     }
 
-    // flush all buffered packets
-    for (node = config->pipe; node;
-         node = node->next) {
-        if (NULL != node->clear) {
-            node->clear(node);
+    for (int dir = 0; dir < 2; dir++) {
+        // flush all buffered packets
+        for (node = config->pipe[dir]; node;
+             node = node->next) {
+            if (NULL != node->clear) {
+                node->clear(node);
+            }
         }
     }
 
@@ -336,7 +332,8 @@ emulator_config_t *emulator_create_config(divert_t *handle,
     config->emulator_thread = (pthread_t)-1;
     config->timer_thread = (pthread_t)-1;
 
-    config->pipe = NULL;
+    config->pipe[0] = NULL;
+    config->pipe[1] = NULL;
     config->exit_pipe = reinject_pipe_create(handle);
     config->exit_pipe->config = config;
 
@@ -378,10 +375,6 @@ void emulator_destroy_config(emulator_config_t *config) {
 
         // destroy buffer
         circ_buf_destroy(config->event_queue);
-
-        // free other things
-        CHECK_AND_FREE(config->packet_size)
-        CHECK_AND_FREE(config->packet_rate)
         free(config);
     }
 }
@@ -435,16 +428,13 @@ void emulator_set_dump_pcap(emulator_config_t *config,
     config->flags |= EMULATOR_DUMP_PCAP;
 }
 
-void emulator_rate_by_size(emulator_config_t *config,
-                           size_t num, size_t *size, float *rate) {
-    size_t *tmp_size;
-    float *tmp_rate;
-    MALLOC_AND_COPY(tmp_size, size, num, size_t)
-    MALLOC_AND_COPY(tmp_rate, rate, num, float)
-    swap((void **)&tmp_size, (void **)&config->packet_size);
-    swap((void **)&tmp_rate, (void **)&config->packet_rate);
-    CHECK_AND_FREE(tmp_size)
-    CHECK_AND_FREE(tmp_rate)
+packet_size_filter *
+emulator_create_size_filter(size_t num, size_t *size, float *rate) {
+    packet_size_filter *filter = calloc(1, sizeof(packet_size_filter));
+    filter->num = num;
+    filter->size = size;
+    filter->rate = rate;
+    return filter;
 }
 
 int emulator_is_running(emulator_config_t *config) {
@@ -462,14 +452,15 @@ int emulator_config_check(emulator_config_t *config, char *errmsg) {
         sprintf(errmsg, "Exit pipe not set.");
         return -1;
     }
-    for (pipe_node_t *cur = config->pipe;
-         cur; cur = cur->next) {
-        switch (cur->pipe_type) {
-            case PIPE_DROP:
-                break;
-            case PIPE_DELAY:
-                break;
-            case PIPE_THROTTLE:
+    for (int dir = 0; dir < 2; dir++) {
+        for (pipe_node_t *cur = config->pipe[dir];
+             cur; cur = cur->next) {
+            switch (cur->pipe_type) {
+                case PIPE_DROP:
+                    break;
+                case PIPE_DELAY:
+                    break;
+                case PIPE_THROTTLE:
                 {
                     throttle_pipe_t *pipe = container_of(cur, throttle_pipe_t, node);
                     float *t1 = pipe->t_start;
@@ -490,21 +481,23 @@ int emulator_config_check(emulator_config_t *config, char *errmsg) {
                         }
                     }
                 }
-                break;
-            case PIPE_DISORDER:
-                break;
-            case PIPE_BITERR:
-                break;
-            case PIPE_BANDWIDTH:
-                break;
-            case PIPE_REINJECT:
-                break;
-            case PIPE_DUPLICATE:
-                break;
-            default:
-                break;
+                    break;
+                case PIPE_DISORDER:
+                    break;
+                case PIPE_BITERR:
+                    break;
+                case PIPE_BANDWIDTH:
+                    break;
+                case PIPE_REINJECT:
+                    break;
+                case PIPE_DUPLICATE:
+                    break;
+                default:
+                    break;
+            }
         }
     }
+
 //    for (int i = 0; i < EMULATOR_EFFECTS; i++) {
 //        if (config->flags & flags[i]) {
 //            if (config->t[i] == NULL ||
@@ -537,20 +530,24 @@ int emulator_config_check(emulator_config_t *config, char *errmsg) {
 
 
 int emulator_add_pipe(emulator_config_t *config,
-                      pipe_node_t *node) {
+                      pipe_node_t *node, int direction) {
+    if (direction != 0 && direction != 1) { return -1; }
     // first check if this pipe exists
-    for (pipe_node_t *ptr = config->pipe;
-         ptr; ptr = ptr->next) {
-        if (ptr == node) {
-            return -1;
+    for (int dir = 0; dir < 2; dir++) {
+        for (pipe_node_t *ptr = config->pipe[dir];
+             ptr; ptr = ptr->next) {
+            if (ptr == node) {
+                return -1;
+            }
         }
     }
+
     node->config = config;
     node->next = config->exit_pipe;
-    if (config->pipe == NULL) {
-        config->pipe = node;
+    if (config->pipe[direction] == NULL) {
+        config->pipe[direction] = node;
     } else {
-        pipe_node_t *ptr = config->pipe;
+        pipe_node_t *ptr = config->pipe[direction];
         while (ptr->next != NULL &&
                ptr->next != config->exit_pipe) {
             ptr = ptr->next;
@@ -566,14 +563,17 @@ int emulator_del_pipe(emulator_config_t *config,
     if (node == config->exit_pipe) {
         return -1;
     }
-    for (pipe_node_t **ptr = &config->pipe;
-         *ptr;) {
-        pipe_node_t *entry = *ptr;
-        if (entry == node) {
-            *ptr = entry->next;
-        } else {
-            ptr = &entry->next;
+    for (int dir = 0; dir < 2; dir++) {
+        for (pipe_node_t **ptr = &config->pipe[dir];
+             *ptr;) {
+            pipe_node_t *entry = *ptr;
+            if (entry == node) {
+                *ptr = entry->next;
+            } else {
+                ptr = &entry->next;
+            }
         }
     }
+
     return 0;
 }

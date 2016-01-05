@@ -1,5 +1,4 @@
 #include "biterr.h"
-#include "emulator.h"
 
 
 static void
@@ -15,8 +14,8 @@ biterr_pipe_insert(pipe_node_t *node,
         if (packet->label != NEW_PACKET) { break; }
         emulator_config_t *config = node->config;
 
-        if (!check_direction(node->direction,
-                             packet->direction)) { break; }
+        if (!is_effect_applied(node->size_filter,
+                               packet->headers.size_payload)) { break; }
         // only apply for packets with payload
         if (packet->headers.size_payload <= 0) { break; }
         if (calc_val_by_time(pipe->t,
@@ -45,9 +44,10 @@ biterr_pipe_insert(pipe_node_t *node,
     next_pipe_insert(node->next, packet);
 }
 
-pipe_node_t *biterr_pipe_create(size_t num, float *t,
+pipe_node_t *biterr_pipe_create(packet_size_filter *filter,
+                                size_t num, float *t,
                                 float *biterr_rate,
-                                int direction, int max_flip) {
+                                int max_flip) {
     biterr_pipe_t *pipe = calloc(1, sizeof(biterr_pipe_t));
     pipe_node_t *node = &pipe->node;
 
@@ -62,7 +62,7 @@ pipe_node_t *biterr_pipe_create(size_t num, float *t,
 
     node->p = 0;
     node->num = num;
-    node->direction = direction;
+    node->size_filter = filter;
 
     return node;
 }
