@@ -1,5 +1,5 @@
 #include "biterr.h"
-
+#include <string.h>
 
 static void
 biterr_pipe_insert(pipe_node_t *node,
@@ -44,6 +44,14 @@ biterr_pipe_insert(pipe_node_t *node,
     next_pipe_insert(node->next, packet);
 }
 
+static void
+biterr_pipe_free(pipe_node_t *node) {
+    biterr_pipe_t *pipe = container_of(node, biterr_pipe_t, node);
+    CHECK_AND_FREE(pipe->t)
+    CHECK_AND_FREE(pipe->biterr_rate)
+    CHECK_AND_FREE(pipe)
+}
+
 pipe_node_t *biterr_pipe_create(packet_size_filter *filter,
                                 size_t num, float *t,
                                 float *biterr_rate,
@@ -51,12 +59,13 @@ pipe_node_t *biterr_pipe_create(packet_size_filter *filter,
     biterr_pipe_t *pipe = calloc(1, sizeof(biterr_pipe_t));
     pipe_node_t *node = &pipe->node;
 
-    pipe->t = t;
-    pipe->biterr_rate = biterr_rate;
+    MALLOC_AND_COPY(pipe->t, t, num, float)
+    MALLOC_AND_COPY(pipe->biterr_rate, biterr_rate, num, float)
     pipe->max_flip = max_flip;
 
     node->pipe_type = PIPE_BITERR;
     node->insert = biterr_pipe_insert;
+    node->free = biterr_pipe_free;
     node->process = NULL;
     node->clear = NULL;
 

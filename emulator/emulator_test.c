@@ -79,7 +79,7 @@ int main(int argc, char *argv[]) {
     emulator_add_flag(config, EMULATOR_RECHECKSUM);
 
     emulator_add_pipe(config, throttle_pipe, DIRECTION_IN);
-    //emulator_add_pipe(config, drop_pipe, DIRECTION_IN);
+    emulator_add_pipe(config, drop_pipe, DIRECTION_IN);
 
     // emulator_set_dump_pcap(config, "/Users/baidu/Downloads");
 

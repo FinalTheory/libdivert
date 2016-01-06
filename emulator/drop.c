@@ -1,4 +1,5 @@
 #include "drop.h"
+#include <string.h>
 
 
 static void
@@ -24,6 +25,14 @@ drop_pipe_insert(pipe_node_t *node,
     next_pipe_insert(node->next, packet);
 }
 
+static void
+drop_pipe_free(pipe_node_t *node) {
+    drop_pipe_t *pipe = container_of(node, drop_pipe_t, node);
+    CHECK_AND_FREE(pipe->t)
+    CHECK_AND_FREE(pipe->drop_rate)
+    CHECK_AND_FREE(pipe)
+}
+
 pipe_node_t *
 drop_pipe_create(packet_size_filter *filter,
                  size_t num, float *t,
@@ -31,11 +40,12 @@ drop_pipe_create(packet_size_filter *filter,
     drop_pipe_t *pipe = calloc(1, sizeof(drop_pipe_t));
     pipe_node_t *node = &pipe->node;
 
-    pipe->t = t;
-    pipe->drop_rate = drop_rate;
+    MALLOC_AND_COPY(pipe->t, t, num, float)
+    MALLOC_AND_COPY(pipe->drop_rate, drop_rate, num, float)
 
     node->pipe_type = PIPE_DROP;
     node->insert = drop_pipe_insert;
+    node->free = drop_pipe_free;
     node->process = NULL;
     node->clear = NULL;
 

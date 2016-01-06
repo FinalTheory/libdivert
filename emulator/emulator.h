@@ -89,6 +89,8 @@ typedef void (*pipe_process_func_t)(pipe_node_t *node);
 
 typedef pipe_process_func_t pipe_clear_func_t;
 
+typedef pipe_process_func_t pipe_free_func_t;
+
 typedef struct {
     size_t *size;
     float *rate;
@@ -103,6 +105,7 @@ struct pipe_node {
     pipe_insert_func_t insert;
     pipe_process_func_t process;
     pipe_clear_func_t clear;
+    pipe_free_func_t free;
 
     ssize_t p;
     ssize_t num;

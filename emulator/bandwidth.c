@@ -1,5 +1,5 @@
 #include "bandwidth.h"
-
+#include <string.h>
 
 static void
 bandwidth_pipe_insert(pipe_node_t *node,
@@ -85,6 +85,15 @@ bandwidth_pipe_clear(pipe_node_t *node) {
     }
 }
 
+static void
+bandwidth_pipe_free(pipe_node_t *node) {
+    bandwidth_pipe_t *pipe = container_of(node, bandwidth_pipe_t, node);
+    CHECK_AND_FREE(pipe->t)
+    CHECK_AND_FREE(pipe->bandwidth)
+    circ_buf_destroy(pipe->buffer);
+    CHECK_AND_FREE(pipe)
+}
+
 pipe_node_t *bandwidth_pipe_create(packet_size_filter *filter,
                                    size_t num, float *t,
                                    float *bandwidth,
@@ -95,14 +104,15 @@ pipe_node_t *bandwidth_pipe_create(packet_size_filter *filter,
     struct timezone tz;
     gettimeofday(&pipe->prev_send, &tz);
 
-    pipe->t = t;
-    pipe->bandwidth = bandwidth;
+    MALLOC_AND_COPY(pipe->t, t, num, float)
+    MALLOC_AND_COPY(pipe->bandwidth, bandwidth, num, float)
     pipe->buffer = circ_buf_create(queue_size);
 
     node->pipe_type = PIPE_BANDWIDTH;
     node->process = bandwidth_pipe_process;
     node->insert = bandwidth_pipe_insert;
     node->clear = bandwidth_pipe_clear;
+    node->free = bandwidth_pipe_free;
 
     node->p = 0;
     node->num = num;

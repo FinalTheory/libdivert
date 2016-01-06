@@ -233,6 +233,7 @@ void *emulator_thread_func(void *args) {
     // join the thread
     if (config->timer_thread != (pthread_t)-1) {
         pthread_join(config->timer_thread, &thread_res);
+        config->timer_thread = (pthread_t)-1;
     }
     config->flags &= ~((uint64_t)EMULATOR_IS_RUNNING);
     return NULL;
@@ -334,8 +335,8 @@ emulator_config_t *emulator_create_config(divert_t *handle,
     config->emulator_thread = (pthread_t)-1;
     config->timer_thread = (pthread_t)-1;
 
-    config->pipe[0] = NULL;
-    config->pipe[1] = NULL;
+    config->pipe[DIRECTION_IN] = NULL;
+    config->pipe[DIRECTION_OUT] = NULL;
     config->exit_pipe = reinject_pipe_create(handle);
     config->exit_pipe->config = config;
 
@@ -375,7 +376,15 @@ void emulator_stop(emulator_config_t *config) {
 
 void emulator_destroy_config(emulator_config_t *config) {
     if (config != NULL) {
-        // TODO: 释放所有pipe的内存
+        // free memory of all pipes
+        for (int dir = 0; dir < 2; dir++) {
+            for (pipe_node_t *node = config->pipe[dir];
+                 node; node = node->next)
+            if (node->free != NULL) {
+                node->free(node);
+            }
+        }
+
         // close .pcap files
         if (config->flags & EMULATOR_DUMP_PCAP) {
             CHECK_AND_FREE(config->dump_path)

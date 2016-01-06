@@ -33,6 +33,14 @@ duplicate_pipe_insert(pipe_node_t *node,
     next_pipe_insert(node->next, packet);
 }
 
+static void
+duplicate_pipe_free(pipe_node_t *node) {
+    duplicate_pipe_t *pipe = container_of(node, duplicate_pipe_t, node);
+    CHECK_AND_FREE(pipe->t)
+    CHECK_AND_FREE(pipe->dup_rate)
+    CHECK_AND_FREE(pipe)
+}
+
 pipe_node_t *
 duplicate_pipe_create(packet_size_filter *filter,
                       size_t num, float *t,
@@ -41,12 +49,13 @@ duplicate_pipe_create(packet_size_filter *filter,
     duplicate_pipe_t *pipe = calloc(1, sizeof(duplicate_pipe_t));
     pipe_node_t *node = &pipe->node;
 
-    pipe->t = t;
-    pipe->dup_rate = dup_rate;
+    MALLOC_AND_COPY(pipe->t, t, num, float)
+    MALLOC_AND_COPY(pipe->dup_rate, dup_rate, num, float)
     pipe->max_duplicate = max_duplicate;
 
     node->pipe_type = PIPE_DUPLICATE;
     node->insert = duplicate_pipe_insert;
+    node->free = duplicate_pipe_free;
     node->process = NULL;
     node->clear = NULL;
 

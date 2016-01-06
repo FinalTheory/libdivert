@@ -1,4 +1,5 @@
 #include "disorder.h"
+#include <string.h>
 
 
 static int
@@ -91,6 +92,16 @@ disorder_pipe_clear(pipe_node_t *node) {
     }
 }
 
+static void
+disorder_pipe_free(pipe_node_t *node) {
+    disorder_pipe_t *pipe = container_of(node, disorder_pipe_t, node);
+    CHECK_AND_FREE(pipe->t)
+    CHECK_AND_FREE(pipe->disorder_rate)
+    pqueue_destroy(pipe->disorder_queue[0]);
+    pqueue_destroy(pipe->disorder_queue[1]);
+    CHECK_AND_FREE(pipe)
+}
+
 pipe_node_t *
 disorder_pipe_create(packet_size_filter *filter,
                      size_t num, float *t,
@@ -100,8 +111,8 @@ disorder_pipe_create(packet_size_filter *filter,
     disorder_pipe_t *pipe = calloc(1, sizeof(disorder_pipe_t));
     pipe_node_t *node = &pipe->node;
 
-    pipe->t = t;
-    pipe->disorder_rate = disorder_rate;
+    MALLOC_AND_COPY(pipe->t, t, num, float)
+    MALLOC_AND_COPY(pipe->disorder_rate, disorder_rate, num, float)
     pipe->disorder_queue[0] = pqueue_new(cmp_disorder_packet, queue_size);
     pipe->disorder_queue[1] = pqueue_new(cmp_disorder_packet, queue_size);
     pipe->packet_cnt[0] = 0;
@@ -112,6 +123,7 @@ disorder_pipe_create(packet_size_filter *filter,
     node->process = disorder_pipe_process;
     node->insert = disorder_pipe_insert;
     node->clear = disorder_pipe_clear;
+    node->free = disorder_pipe_free;
 
     node->p = 0;
     node->num = num;

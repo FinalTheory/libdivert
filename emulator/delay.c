@@ -1,4 +1,5 @@
 #include "delay.h"
+#include <string.h>
 
 static int
 cmp_delay_packet(const void *x, const void *y) {
@@ -102,6 +103,15 @@ delay_pipe_clear(pipe_node_t *node) {
     }
 }
 
+static void
+delay_pipe_free(pipe_node_t *node) {
+    delay_pipe_t *pipe = container_of(node, delay_pipe_t, node);
+    CHECK_AND_FREE(pipe->t)
+    CHECK_AND_FREE(pipe->delay_time)
+    pqueue_destroy(pipe->delay_queue);
+    CHECK_AND_FREE(pipe)
+}
+
 pipe_node_t *delay_pipe_create(packet_size_filter *filter,
                                size_t num, float *t,
                                float *delay_time,
@@ -109,14 +119,15 @@ pipe_node_t *delay_pipe_create(packet_size_filter *filter,
     delay_pipe_t *pipe = calloc(1, sizeof(delay_pipe_t));
     pipe_node_t *node = &pipe->node;
 
-    pipe->t = t;
-    pipe->delay_time = delay_time;
+    MALLOC_AND_COPY(pipe->t, t, num, float)
+    MALLOC_AND_COPY(pipe->delay_time, delay_time, num, float)
     pipe->delay_queue = pqueue_new(cmp_delay_packet, queue_size);
 
     node->pipe_type = PIPE_DELAY;
     node->process = delay_pipe_process;
     node->insert = delay_pipe_insert;
     node->clear = delay_pipe_clear;
+    node->free = delay_pipe_free;
 
     node->p = 0;
     node->num = num;

@@ -1,4 +1,5 @@
 #include "throttle.h"
+#include <string.h>
 
 
 static double
@@ -110,6 +111,15 @@ throttle_pipe_clear(pipe_node_t *node) {
     }
 }
 
+static void
+throttle_pipe_free(pipe_node_t *node) {
+    throttle_pipe_t *pipe = container_of(node, throttle_pipe_t, node);
+    circ_buf_destroy(pipe->throttle_queue);
+    CHECK_AND_FREE(pipe->t_start)
+    CHECK_AND_FREE(pipe->t_end)
+    CHECK_AND_FREE(pipe)
+}
+
 pipe_node_t *
 throttle_pipe_create(packet_size_filter *filter,
                      size_t num,
@@ -119,14 +129,15 @@ throttle_pipe_create(packet_size_filter *filter,
     throttle_pipe_t *pipe = calloc(1, sizeof(throttle_pipe_t));
     pipe_node_t *node = &pipe->node;
 
-    pipe->t_start = t_start;
-    pipe->t_end = t_end;
+    MALLOC_AND_COPY(pipe->t_start, t_start, num, float)
+    MALLOC_AND_COPY(pipe->t_end, t_end, num, float)
     pipe->throttle_queue = circ_buf_create(queue_size);
 
     node->pipe_type = PIPE_THROTTLE;
     node->insert = throttle_pipe_insert;
     node->process = throttle_pipe_process;
     node->clear = throttle_pipe_clear;
+    node->free = throttle_pipe_free;
 
     node->p = 0;
     node->num = num;
