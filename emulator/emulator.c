@@ -246,6 +246,7 @@ register_timer(pipe_node_t *node,
 void emulator_callback(void *args, void *proc,
                        struct ip *ip_data, struct sockaddr *sin) {
     char errmsg[DIVERT_ERRBUF_SIZE];
+    emulator_packet_t tmp_pkt;
     // Note: this function won't be reentry
     emulator_config_t *config = args;
     proc_info_t *proc_info = proc;
@@ -294,11 +295,19 @@ void emulator_callback(void *args, void *proc,
     /*
      * If no pipe is associated with this packet direction
      * or the direction of this packet is unknown
-     * then just also re-inject it
+     * then just insert it into exit pipe
      */
     if (direction == DIRECTION_UNKNOWN ||
         config->pipe[direction] == NULL) {
-        divert_reinject(pipe->handle, ip_data, -1, sin);
+        memset(&tmp_pkt, 0, sizeof(tmp_pkt));
+        tmp_pkt.sin = *sin;
+        tmp_pkt.ip_data = ip_data;
+        tmp_pkt.label = BYPASS_PACKET;
+        tmp_pkt.direction = direction;
+        tmp_pkt.proc_info = *((proc_info_t *)proc);
+        divert_dump_packet((u_char *)tmp_pkt.ip_data,
+                           &tmp_pkt.headers, errmsg);
+        config->exit_pipe->insert(config->exit_pipe, &tmp_pkt);
         return;
     }
 
@@ -308,10 +317,10 @@ void emulator_callback(void *args, void *proc,
     emulator_packet_t *packet = calloc(1, sizeof(emulator_packet_t));
     MALLOC_AND_COPY(packet->ip_data, ip_data,
                     ntohs(ip_data->ip_len), u_char)
-    packet->proc_info = *((proc_info_t *)proc);
     packet->sin = *sin;
     packet->label = NEW_PACKET;
     packet->direction = direction;
+    packet->proc_info = *((proc_info_t *)proc);
     divert_dump_packet((u_char *)packet->ip_data,
                        &packet->headers, errmsg);
 

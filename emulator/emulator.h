@@ -37,6 +37,7 @@ enum {
     NEW_PACKET = 0,
     TIMEOUT_EVENT = 1,
     EVENT_QUIT = 2,
+    BYPASS_PACKET = 3,
 };
 
 
