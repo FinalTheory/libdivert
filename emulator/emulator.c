@@ -169,6 +169,10 @@ void *emulator_timer_thread_func(void *args) {
         }
     }
     finish:
+    while (pqueue_size(config->timer_queue) > 0) {
+        ptr = pqueue_dequeue(config->timer_queue);
+        CHECK_AND_FREE(ptr)
+    }
     return NULL;
 }
 
@@ -236,11 +240,9 @@ void *emulator_thread_func(void *args) {
 
 void
 register_timer(pipe_node_t *node,
-               struct timeval *tv,
-               int event_id) {
+               struct timeval *tv) {
     emulator_config_t *config = node->config;
     timeout_event_t *event = malloc(sizeof(timeout_event_t));
-    event->flag = event_id;
     event->tv = *tv;
     pqueue_enqueue(config->timer_queue, event);
 }
@@ -342,29 +344,38 @@ emulator_config_t *emulator_create_config(divert_t *handle,
 
     config->timeout_packet.label = TIMEOUT_EVENT;
 
+    return config;
+}
+
+void emulator_start(emulator_config_t *config) {
     // create emulator thread
     // associated with emulator_config_t
     pthread_create(&config->emulator_thread, NULL,
                    emulator_thread_func, config);
-
-    return config;
 }
 
-void emulator_destroy_config(emulator_config_t *config) {
+void emulator_stop(emulator_config_t *config) {
     void *thread_res;
     if (config != NULL) {
         // insert a signal to stop the emulator thread
-        emulator_packet_t *ptr = malloc(sizeof(emulator_packet_t));
-        memset(ptr, 0, sizeof(emulator_packet_t));
-        ptr->label = EVENT_QUIT;
-        circ_buf_insert(config->event_queue, ptr);
+        emulator_packet_t packet;
+        memset(&packet, 0, sizeof(emulator_packet_t));
+        packet.label = EVENT_QUIT;
+        circ_buf_insert(config->event_queue, &packet);
 
         // wait emulator thread to exit
         if (config->emulator_thread != (pthread_t)-1) {
             pthread_join(config->emulator_thread, &thread_res);
             config->emulator_thread = (pthread_t)-1;
         }
+        // remove the running flag
+        config->flags &= ~((int64_t)EMULATOR_IS_RUNNING);
+    }
+}
 
+void emulator_destroy_config(emulator_config_t *config) {
+    if (config != NULL) {
+        // TODO: 释放所有pipe的内存
         // close .pcap files
         if (config->flags & EMULATOR_DUMP_PCAP) {
             CHECK_AND_FREE(config->dump_path)

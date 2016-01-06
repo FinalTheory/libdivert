@@ -88,6 +88,8 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    emulator_start(config);
+
     // set the callback function to handle packets
     divert_set_callback(handle, emulator_callback, config);
 
@@ -110,6 +112,8 @@ int main(int argc, char *argv[]) {
 
     // call the main loop
     divert_loop(handle, -1);
+
+    emulator_stop(config);
 
     // clear the emulator config
     emulator_destroy_config(config);

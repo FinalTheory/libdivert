@@ -34,9 +34,9 @@ enum {
 };
 
 enum {
-    TIMEOUT_EVENT = 0,
-    EVENT_QUIT = 1,
-    NEW_PACKET = 2,
+    NEW_PACKET = 0,
+    TIMEOUT_EVENT = 1,
+    EVENT_QUIT = 2,
 };
 
 
@@ -193,24 +193,27 @@ void time_add(struct timeval *tv, double time);
 int is_effect_applied(packet_size_filter *filter,
                       size_t real_size);
 
+void
+register_timer(pipe_node_t *node,
+               struct timeval *tv);
 
 /*
  * Interfaces
  */
 
-void register_timer(pipe_node_t *node,
-                    struct timeval *tv,
-                    int event_id);
-
 void emulator_callback(void *, void *, struct ip *, struct sockaddr *);
 
 void *emulator_thread_func(void *args);
 
-emulator_config_t
-        *emulator_create_config(divert_t *handle,
-                                size_t buf_size);
+emulator_config_t *
+emulator_create_config(divert_t *handle,
+                       size_t buf_size);
 
 void emulator_destroy_config(emulator_config_t *config);
+
+void emulator_start(emulator_config_t *config);
+
+void emulator_stop(emulator_config_t *config);
 
 int emulator_add_pipe(emulator_config_t *config,
                       pipe_node_t *node, int direction);

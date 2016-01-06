@@ -62,8 +62,7 @@ bandwidth_pipe_process(pipe_node_t *node) {
         bandwidth_packet_t *ptr = circ_buf_head(pipe->buffer);
         if (!ptr->is_registered) {
             // register timeout event
-            register_timer(node, &ptr->time_send,
-                           TIMEOUT_EVENT);
+            register_timer(node, &ptr->time_send);
             ptr->is_registered = 1;
         }
         // then send them to next pipe
