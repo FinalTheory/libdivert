@@ -19,11 +19,9 @@ reinject_pipe_insert(pipe_node_t *node,
         divert_dump_pcap(packet->ip_data,
                          config->dump_affected);
     }
-    // and free this memory (only for new packet)
-    if (packet->label == NEW_PACKET) {
-        CHECK_AND_FREE(packet->ip_data)
-        CHECK_AND_FREE(packet)
-    }
+    // and free this memory
+    CHECK_AND_FREE(packet->ip_data)
+    CHECK_AND_FREE(packet)
 }
 
 pipe_node_t *reinject_pipe_create(divert_t *handle) {

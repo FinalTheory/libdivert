@@ -198,23 +198,31 @@ void *emulator_thread_func(void *args) {
         emulator_packet_t *packet =
                 circ_buf_remove(config->packet_queue);
 
-        // check if this is a quit signal
-        if (packet->label == EVENT_QUIT) { break; }
-
-        int dir = packet->direction;
-        // insert packet into first pipe
-        config->pipe[dir]->insert(config->pipe[dir], packet);
-        // process each pipe if it has process function
-        for (node = config->pipe[dir]; node;
-             node = node->next) {
-                 if (NULL != node->process) {
-                     node->process(node);
-                 }
+        // check the label of this packet
+        // and take corresponding actions
+        if (packet->label == EVENT_QUIT) {
+            // quit event, just break
+            break;
+        } else if (packet->label == BYPASS_PACKET) {
+            // a packet that won't match any rule
+            // just insert it into exit pipe
+            config->exit_pipe->insert(config->exit_pipe, packet);
+        } else if (packet->label == NEW_PACKET) {
+            int dir = packet->direction;
+            // insert packet into first pipe
+            config->pipe[dir]->insert(config->pipe[dir], packet);
+            // process each pipe if it has process function
+            for (node = config->pipe[dir]; node;
+                 node = node->next) {
+                if (NULL != node->process) {
+                    node->process(node);
+                }
+            }
         }
     }
 
+    // flush all buffered packets
     for (int dir = 0; dir < 2; dir++) {
-        // flush all buffered packets
         for (node = config->pipe[dir]; node;
              node = node->next) {
             if (NULL != node->clear) {
@@ -223,7 +231,7 @@ void *emulator_thread_func(void *args) {
         }
     }
 
-    // quit timer thread
+    // send a NULL to quit timer thread
     pqueue_enqueue(config->timer_queue, NULL);
     // join the thread
     if (config->timer_thread != (pthread_t)-1) {
@@ -244,9 +252,9 @@ register_timer(pipe_node_t *node,
 }
 
 void emulator_callback(void *args, void *proc,
-                       struct ip *ip_data, struct sockaddr *sin) {
+                       struct ip *ip_data,
+                       struct sockaddr *sin) {
     char errmsg[DIVERT_ERRBUF_SIZE];
-    emulator_packet_t tmp_pkt;
     // Note: this function won't be reentry
     emulator_config_t *config = args;
     proc_info_t *proc_info = proc;
@@ -271,6 +279,8 @@ void emulator_callback(void *args, void *proc,
      */
     if (!check_pid_in_list(pid, config->pid_list,
                            config->num_pid)) {
+        // do not re-inject through exit pipe
+        // since we're not interested in this packet
         divert_reinject(pipe->handle, ip_data, -1, sin);
         return;
     }
@@ -293,34 +303,25 @@ void emulator_callback(void *args, void *proc,
     }
 
     /*
-     * If no pipe is associated with this packet direction
-     * or the direction of this packet is unknown
-     * then just insert it into exit pipe
-     */
-    if (direction == DIRECTION_UNKNOWN ||
-        config->pipe[direction] == NULL) {
-        memset(&tmp_pkt, 0, sizeof(tmp_pkt));
-        tmp_pkt.sin = *sin;
-        tmp_pkt.ip_data = ip_data;
-        tmp_pkt.label = BYPASS_PACKET;
-        tmp_pkt.direction = direction;
-        tmp_pkt.proc_info = *((proc_info_t *)proc);
-        divert_dump_packet((u_char *)tmp_pkt.ip_data,
-                           &tmp_pkt.headers, errmsg);
-        config->exit_pipe->insert(config->exit_pipe, &tmp_pkt);
-        return;
-    }
-
-    /*
      * packets production stage
      */
     emulator_packet_t *packet = calloc(1, sizeof(emulator_packet_t));
-    MALLOC_AND_COPY(packet->ip_data, ip_data,
-                    ntohs(ip_data->ip_len), u_char)
+    /*
+     * If no pipe is associated with this packet direction
+     * or the direction of this packet is unknown
+     * then we mark it as a special packet type
+     */
+    if (direction == DIRECTION_UNKNOWN ||
+        config->pipe[direction] == NULL) {
+        packet->label = BYPASS_PACKET;
+    } else {
+        packet->label = NEW_PACKET;
+    }
     packet->sin = *sin;
-    packet->label = NEW_PACKET;
     packet->direction = direction;
     packet->proc_info = *((proc_info_t *)proc);
+    MALLOC_AND_COPY(packet->ip_data, ip_data,
+                    ntohs(ip_data->ip_len), u_char)
     divert_dump_packet((u_char *)packet->ip_data,
                        &packet->headers, errmsg);
 
