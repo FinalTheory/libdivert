@@ -201,20 +201,15 @@ void *emulator_thread_func(void *args) {
         // check if this is a quit signal
         if (packet->label == EVENT_QUIT) { break; }
 
-        // check direction of this packet
-        if (packet->direction != DIRECTION_UNKNOWN) {
-            int dir = packet->direction;
-            // insert packet into first pipe
-            config->pipe[dir]->insert(config->pipe[dir], packet);
-            // process each pipe if it has process function
-            for (node = config->pipe[dir]; node;
-                 node = node->next)
-                if (NULL != node->process) {
-                    node->process(node);
-                }
-        } else {
-            // for packet with unknown direction, just re-inject it
-            config->exit_pipe->insert(config->exit_pipe, packet);
+        int dir = packet->direction;
+        // insert packet into first pipe
+        config->pipe[dir]->insert(config->pipe[dir], packet);
+        // process each pipe if it has process function
+        for (node = config->pipe[dir]; node;
+             node = node->next) {
+                 if (NULL != node->process) {
+                     node->process(node);
+                 }
         }
     }
 
@@ -257,6 +252,9 @@ void emulator_callback(void *args, void *proc,
     pid_t pid = proc_info->pid != -1 ?
                 proc_info->pid : proc_info->epid;
 
+    reinject_pipe_t *pipe = container_of(config->exit_pipe,
+                                         reinject_pipe_t, node);
+
     /*
      * if this packet is from unknown PID
      * then we must record it first
@@ -272,8 +270,6 @@ void emulator_callback(void *args, void *proc,
      */
     if (!check_pid_in_list(pid, config->pid_list,
                            config->num_pid)) {
-        reinject_pipe_t *pipe = container_of(config->exit_pipe,
-                                             reinject_pipe_t, node);
         divert_reinject(pipe->handle, ip_data, -1, sin);
         return;
     }
@@ -285,24 +281,40 @@ void emulator_callback(void *args, void *proc,
         divert_dump_pcap(ip_data, config->dump_normal);
     }
 
+    // check direction of this packet
+    u_char direction;
+    if (divert_is_inbound(sin, NULL)) {
+        direction = DIRECTION_IN;
+    } else if (divert_is_outbound(sin)) {
+        direction = DIRECTION_OUT;
+    } else {
+        direction = DIRECTION_UNKNOWN;
+    }
+
+    /*
+     * If no pipe is associated with this packet direction
+     * or the direction of this packet is unknown
+     * then just also re-inject it
+     */
+    if (direction == DIRECTION_UNKNOWN ||
+        config->pipe[direction] == NULL) {
+        divert_reinject(pipe->handle, ip_data, -1, sin);
+        return;
+    }
+
     /*
      * packets production stage
      */
-    emulator_packet_t *packet = malloc(sizeof(emulator_packet_t));
+    emulator_packet_t *packet = calloc(1, sizeof(emulator_packet_t));
     MALLOC_AND_COPY(packet->ip_data, ip_data,
                     ntohs(ip_data->ip_len), u_char)
     packet->proc_info = *((proc_info_t *)proc);
     packet->sin = *sin;
     packet->label = NEW_PACKET;
+    packet->direction = direction;
     divert_dump_packet((u_char *)packet->ip_data,
                        &packet->headers, errmsg);
-    if (divert_is_inbound(sin, NULL)) {
-        packet->direction = DIRECTION_IN;
-    } else if (divert_is_outbound(sin)) {
-        packet->direction = DIRECTION_OUT;
-    } else {
-        packet->direction = DIRECTION_UNKNOWN;
-    }
+
     circ_buf_insert(config->event_queue, packet);
 }
 
