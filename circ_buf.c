@@ -1,8 +1,6 @@
 #include "circ_buf.h"
 #include <stdlib.h>
 
-// TODO: 给这堆东西增加无锁版本!!!
-
 
 inline static void
 free_all_memory(circ_buf_t *sp) {

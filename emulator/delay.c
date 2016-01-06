@@ -121,7 +121,7 @@ pipe_node_t *delay_pipe_create(packet_size_filter *filter,
 
     MALLOC_AND_COPY(pipe->t, t, num, float)
     MALLOC_AND_COPY(pipe->delay_time, delay_time, num, float)
-    pipe->delay_queue = pqueue_new(cmp_delay_packet, queue_size);
+    pipe->delay_queue = pqueue_new(cmp_delay_packet, queue_size, 0);
 
     node->pipe_type = PIPE_DELAY;
     node->process = delay_pipe_process;

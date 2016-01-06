@@ -34,6 +34,8 @@ typedef struct PQueue_s {
     void **data;
     /* A pointer to a comparator function, used to prioritize elements */
     int (*cmp)(const void *d1, const void *d2);
+    /* Indicate if this queue should be thread safe */
+    int thread_safe;
     pthread_mutex_t mutex;
     pthread_cond_t UntilNotEmpty;
     pthread_cond_t UntilNotFull;
@@ -43,7 +45,7 @@ typedef struct PQueue_s {
 Needs a pointer to a comparator function, thus establishing priorities .
 */
 pqueue *pqueue_new(int (*cmp)(const void *d1, const void *d2),
-                   size_t capacity);
+                   size_t capacity, int thread_safe);
 
 /** De-allocates memory for a given Priority Queue */
 void pqueue_destroy(pqueue *q);

@@ -362,7 +362,7 @@ emulator_config_t *emulator_create_config(divert_t *handle,
     config->exit_pipe->config = config;
 
     config->packet_queue = circ_buf_create(buf_size, 1);
-    config->timer_queue = pqueue_new(cmp_time_event, TIMER_QUEUE_SIZE);
+    config->timer_queue = pqueue_new(cmp_time_event, TIMER_QUEUE_SIZE, 1);
 
     config->timeout_packet.label = TIMEOUT_EVENT;
 

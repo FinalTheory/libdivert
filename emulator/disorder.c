@@ -113,8 +113,8 @@ disorder_pipe_create(packet_size_filter *filter,
 
     MALLOC_AND_COPY(pipe->t, t, num, float)
     MALLOC_AND_COPY(pipe->disorder_rate, disorder_rate, num, float)
-    pipe->disorder_queue[0] = pqueue_new(cmp_disorder_packet, queue_size);
-    pipe->disorder_queue[1] = pqueue_new(cmp_disorder_packet, queue_size);
+    pipe->disorder_queue[0] = pqueue_new(cmp_disorder_packet, queue_size, 0);
+    pipe->disorder_queue[1] = pqueue_new(cmp_disorder_packet, queue_size, 0);
     pipe->packet_cnt[0] = 0;
     pipe->packet_cnt[1] = 0;
     pipe->max_disorder = max_disorder;
