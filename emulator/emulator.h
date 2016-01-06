@@ -163,7 +163,7 @@ struct emulator {
     /*
      * store all packets and events
      */
-    circ_buf_t *event_queue;
+    circ_buf_t *packet_queue;
 
     /*
      * store timeout events

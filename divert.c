@@ -129,7 +129,7 @@ static int divert_init_divert_socket(divert_t *divert_handle) {
 
     /* allocate thread buffer to store labeled packet */
     divert_handle->thread_buffer =
-            circ_buf_create(divert_handle->thread_buffer_size);
+            circ_buf_create(divert_handle->thread_buffer_size, 1);
     if (divert_handle->thread_buffer == NULL) {
         return DIVERT_BUF_FAILURE;
     }

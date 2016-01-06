@@ -23,7 +23,7 @@ set(LIB_SOURCE_FILES
         print_data.c
         print_packet.c
         queue.c
-        buffer.c
+        circ_buf.c
         dump_packet.c
         ipfw_utils.c
         divert_kext.c

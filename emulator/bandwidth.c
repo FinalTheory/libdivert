@@ -5,6 +5,7 @@ static void
 bandwidth_pipe_insert(pipe_node_t *node,
                       emulator_packet_t *packet) {
     struct timezone tz;
+    struct timeval time_now;
     bandwidth_pipe_t *pipe = container_of(node, bandwidth_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -31,7 +32,6 @@ bandwidth_pipe_insert(pipe_node_t *node,
         time_add(&time_send, time_delta);
 
         // see if we should send this packet right now
-        struct timeval time_now;
         gettimeofday(&time_now, &tz);
         if (time_greater_than(&time_now, &time_send)) { break; }
 
@@ -48,9 +48,15 @@ bandwidth_pipe_insert(pipe_node_t *node,
         pipe->prev_send = time_send;
         return;
     } while (0);
-    // update time stamp of previous sent packet
     next_pipe_insert(node->next, packet);
-    gettimeofday(&pipe->prev_send, &tz);
+    // update time stamp of previous sent packet
+    if (packet->label == NEW_PACKET) {
+        gettimeofday(&time_now, &tz);
+        if (time_greater_than(&time_now,
+                              &pipe->prev_send)) {
+            pipe->prev_send = time_now;
+        }
+    }
 }
 
 static void
@@ -106,7 +112,7 @@ pipe_node_t *bandwidth_pipe_create(packet_size_filter *filter,
 
     MALLOC_AND_COPY(pipe->t, t, num, float)
     MALLOC_AND_COPY(pipe->bandwidth, bandwidth, num, float)
-    pipe->buffer = circ_buf_create(queue_size);
+    pipe->buffer = circ_buf_create(queue_size, 0);
 
     node->pipe_type = PIPE_BANDWIDTH;
     node->process = bandwidth_pipe_process;

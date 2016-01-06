@@ -15,6 +15,7 @@ typedef struct {
     /* buf[(front+1)%n] is first item */
     size_t rear;
     /* buf[rear%n] is last item */
+    int thread_safe;
     pthread_mutex_t mutex;
     /* binary semaphore for locking */
     pthread_cond_t UntilNotEmpty;
@@ -22,7 +23,7 @@ typedef struct {
     pthread_cond_t UntilNotFull;
 } circ_buf_t;
 
-circ_buf_t *circ_buf_create(size_t capacity);
+circ_buf_t *circ_buf_create(size_t capacity, int thread_safe);
 
 void circ_buf_destroy(circ_buf_t *sp);
 

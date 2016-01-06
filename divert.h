@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-#include "buffer.h"
+#include "circ_buf.h"
 #include <stdio.h>
 #include <netinet/ip.h>
 #include "netinet/ip_fw.h"

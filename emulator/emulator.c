@@ -155,7 +155,7 @@ void *emulator_timer_thread_func(void *args) {
             gettimeofday(&time_now, &tz);
             if (time_greater_than(&ptr->tv, &time_now)) { break; }
             ptr = pqueue_dequeue(config->timer_queue);
-            circ_buf_insert(config->event_queue,
+            circ_buf_insert(config->packet_queue,
                             &config->timeout_packet);
             CHECK_AND_FREE(ptr)
         }
@@ -196,7 +196,7 @@ void *emulator_thread_func(void *args) {
     while (1) {
         // get a packet from buffer
         emulator_packet_t *packet =
-                circ_buf_remove(config->event_queue);
+                circ_buf_remove(config->packet_queue);
 
         // check if this is a quit signal
         if (packet->label == EVENT_QUIT) { break; }
@@ -315,7 +315,7 @@ void emulator_callback(void *args, void *proc,
     divert_dump_packet((u_char *)packet->ip_data,
                        &packet->headers, errmsg);
 
-    circ_buf_insert(config->event_queue, packet);
+    circ_buf_insert(config->packet_queue, packet);
 }
 
 static int
@@ -352,7 +352,7 @@ emulator_config_t *emulator_create_config(divert_t *handle,
     config->exit_pipe = reinject_pipe_create(handle);
     config->exit_pipe->config = config;
 
-    config->event_queue = circ_buf_create(buf_size);
+    config->packet_queue = circ_buf_create(buf_size, 1);
     config->timer_queue = pqueue_new(cmp_time_event, TIMER_QUEUE_SIZE);
 
     config->timeout_packet.label = TIMEOUT_EVENT;
@@ -374,7 +374,7 @@ void emulator_stop(emulator_config_t *config) {
         emulator_packet_t packet;
         memset(&packet, 0, sizeof(emulator_packet_t));
         packet.label = EVENT_QUIT;
-        circ_buf_insert(config->event_queue, &packet);
+        circ_buf_insert(config->packet_queue, &packet);
 
         // wait emulator thread to exit
         if (config->emulator_thread != (pthread_t)-1) {
@@ -406,7 +406,7 @@ void emulator_destroy_config(emulator_config_t *config) {
         }
 
         // destroy buffer
-        circ_buf_destroy(config->event_queue);
+        circ_buf_destroy(config->packet_queue);
         free(config);
     }
 }
