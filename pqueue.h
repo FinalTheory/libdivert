@@ -37,34 +37,34 @@ typedef struct PQueue_s {
     pthread_mutex_t mutex;
     pthread_cond_t UntilNotEmpty;
     pthread_cond_t UntilNotFull;
-} PQueue;
+} pqueue;
 
 /** Allocates memory for a new Priority Queue .
 Needs a pointer to a comparator function, thus establishing priorities .
 */
-PQueue *pqueue_new(int (*cmp)(const void *d1, const void *d2),
+pqueue *pqueue_new(int (*cmp)(const void *d1, const void *d2),
                    size_t capacity);
 
 /** De-allocates memory for a given Priority Queue */
-void pqueue_destroy(PQueue *q);
+void pqueue_destroy(pqueue *q);
 
 /** Add an element inside the Priority Queue */
-void pqueue_enqueue(PQueue *q, const void *data);
+void pqueue_enqueue(pqueue *q, const void *data);
 
-void pqueue_wait_until(PQueue *q,
+void pqueue_wait_until(pqueue *q,
                        struct timeval *timeout);
 
 /** Removes the element with the greatest priority from within the Queue */
-void *pqueue_dequeue(PQueue *q);
+void *pqueue_dequeue(pqueue *q);
 
-size_t pqueue_size(PQueue *q);
+size_t pqueue_size(pqueue *q);
 
-size_t pqueue_capacity(PQueue *q);
+size_t pqueue_capacity(pqueue *q);
 
-int pqueue_is_full(PQueue *q);
+int pqueue_is_full(pqueue *q);
 
-int pqueue_is_empty(PQueue *q);
+int pqueue_is_empty(pqueue *q);
 
-void *pqueue_head(PQueue *q);
+void *pqueue_head(pqueue *q);
 
 #endif

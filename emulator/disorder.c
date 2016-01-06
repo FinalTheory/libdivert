@@ -37,7 +37,7 @@ disorder_pipe_insert(pipe_node_t *node,
                              node->num, &node->p,
                              &node->tv_start) < rand_double()) { break; }
         // get the corresponding packet queue
-        PQueue *disorder_queue = pipe->disorder_queue[packet->direction];
+        pqueue *disorder_queue = pipe->disorder_queue[packet->direction];
         // check if there is empty slot in queue
         if (pqueue_is_full(disorder_queue)) { break; }
 
@@ -61,7 +61,7 @@ disorder_pipe_process(pipe_node_t *node) {
 
     // move inbound/outbound disorder packets into next pipe
     for (int q = 0; q < 2; q++) {
-        PQueue *disorder_queue =
+        pqueue *disorder_queue =
                 pipe->disorder_queue[q];
         while (pqueue_size(disorder_queue) > 0) {
             disorder_packet_t *ptr = pqueue_head(disorder_queue);
@@ -82,7 +82,7 @@ disorder_pipe_clear(pipe_node_t *node) {
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
     for (int q = 0; q < 2; q++) {
-        PQueue *disorder_queue =
+        pqueue *disorder_queue =
                 pipe->disorder_queue[q];
         while (pqueue_size(disorder_queue) > 0) {
             disorder_packet_t *ptr = pqueue_dequeue(disorder_queue);

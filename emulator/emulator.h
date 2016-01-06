@@ -168,7 +168,7 @@ struct emulator {
     /*
      * store timeout events
      */
-    PQueue *timer_queue;
+    pqueue *timer_queue;
 
     emulator_packet_t timeout_packet;
 };

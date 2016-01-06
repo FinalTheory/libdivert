@@ -7,7 +7,7 @@ typedef struct {
     pipe_node_t node;
     float *t;
     float *delay_time;
-    PQueue *delay_queue;
+    pqueue *delay_queue;
 } delay_pipe_t;
 
 typedef struct {

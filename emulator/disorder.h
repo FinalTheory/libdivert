@@ -15,7 +15,7 @@ typedef struct {
     float *disorder_rate;
     int max_disorder;
     uint64_t packet_cnt[2];
-    PQueue *disorder_queue[2];
+    pqueue *disorder_queue[2];
 } disorder_pipe_t;
 
 pipe_node_t *

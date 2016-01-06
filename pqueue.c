@@ -7,7 +7,7 @@
 #define RIGHT(x) (2 * (x) + 2)
 #define PARENT(x) ((x-1) / 2)
 
-void pqueue_heapify(PQueue *q, size_t idx);
+void pqueue_heapify(pqueue *q, size_t idx);
 
 /**
 * Allocates memory for a new Priority Queue structure .
@@ -17,9 +17,9 @@ void pqueue_heapify(PQueue *q, size_t idx);
 *   returns [negative value] if d1 have a smaller priority than d2
 *   returns [positive value] if d1 have a greater priority than d2
 */
-PQueue *pqueue_new(int (*cmp)(const void *d1, const void *d2),
+pqueue *pqueue_new(int (*cmp)(const void *d1, const void *d2),
                    size_t capacity) {
-    PQueue *res = NULL;
+    pqueue *res = NULL;
     NP_CHECK(cmp);
     res = malloc(sizeof(*res));
     NP_CHECK(res);
@@ -43,7 +43,7 @@ PQueue *pqueue_new(int (*cmp)(const void *d1, const void *d2),
 /**
 * De-allocates memory for a given Priority Queue structure .
 */
-void pqueue_destroy(PQueue *q) {
+void pqueue_destroy(pqueue *q) {
     if (NULL == q) {
         DEBUG("Priority Queue is already NULL. Nothing to free.");
         return;
@@ -56,7 +56,7 @@ void pqueue_destroy(PQueue *q) {
 /*
  * Wait until a new element is inserted
  */
-void pqueue_wait_until(PQueue *q,
+void pqueue_wait_until(pqueue *q,
                        struct timeval *timeout) {
     pthread_mutex_lock(&q->mutex);
     if (timeout == NULL) {
@@ -74,7 +74,7 @@ void pqueue_wait_until(PQueue *q,
 /**
 * Adds a new element to the Priority Queue .
 */
-void pqueue_enqueue(PQueue *q, const void *data) {
+void pqueue_enqueue(pqueue *q, const void *data) {
     size_t i;
     void *tmp = NULL;
     NP_CHECK(q);
@@ -101,7 +101,7 @@ void pqueue_enqueue(PQueue *q, const void *data) {
 /**
 * Returns the element with the biggest priority from the queue .
 */
-void *pqueue_head(PQueue *q) {
+void *pqueue_head(pqueue *q) {
     void *res = NULL;
     pthread_mutex_lock(&q->mutex);
     while (q->size < 1) {
@@ -115,7 +115,7 @@ void *pqueue_head(PQueue *q) {
 /**
 * Returns size and capacity of a queue
 */
-size_t pqueue_size(PQueue *q) {
+size_t pqueue_size(pqueue *q) {
     size_t res = 0;
     pthread_mutex_lock(&q->mutex);
     res = q->size;
@@ -123,7 +123,7 @@ size_t pqueue_size(PQueue *q) {
     return res;
 }
 
-size_t pqueue_capacity(PQueue *q) {
+size_t pqueue_capacity(pqueue *q) {
     size_t res = 0;
     pthread_mutex_lock(&q->mutex);
     res = q->capacity;
@@ -131,7 +131,7 @@ size_t pqueue_capacity(PQueue *q) {
     return res;
 }
 
-int pqueue_is_full(PQueue *q) {
+int pqueue_is_full(pqueue *q) {
     int res = 0;
     pthread_mutex_lock(&q->mutex);
     res = q->size >= q->capacity;
@@ -139,7 +139,7 @@ int pqueue_is_full(PQueue *q) {
     return res;
 }
 
-int pqueue_is_empty(PQueue *q) {
+int pqueue_is_empty(pqueue *q) {
     int res = 0;
     pthread_mutex_lock(&q->mutex);
     res = q->size < 1;
@@ -150,7 +150,7 @@ int pqueue_is_empty(PQueue *q) {
 /**
 * Returns the element with the biggest priority from the queue .
 */
-void *pqueue_dequeue(PQueue *q) {
+void *pqueue_dequeue(pqueue *q) {
     void *data = NULL;
     NP_CHECK(q);
     pthread_mutex_lock(&q->mutex);
@@ -170,7 +170,7 @@ void *pqueue_dequeue(PQueue *q) {
 /**
 * Turn an "almost-heap" into a heap .
 */
-void pqueue_heapify(PQueue *q, size_t idx) {
+void pqueue_heapify(pqueue *q, size_t idx) {
     /* left index, right index, largest */
     void *tmp = NULL;
     size_t l_idx, r_idx, lrg_idx;
