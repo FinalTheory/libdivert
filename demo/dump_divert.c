@@ -86,9 +86,6 @@ int main(int argc, char *argv[]) {
     proc_name(pid, proc_name_buf, sizeof(proc_name_buf));
     printf("Watching packets of %s: %d\n", proc_name_buf, pid);
 
-    // buffer for error information
-    char errmsg[DIVERT_ERRBUF_SIZE];
-
     // open file for pcap
     fp1 = fopen("data.pcap", "w");
     fp2 = fopen("data_unknown.pcap", "w");
@@ -112,8 +109,8 @@ int main(int argc, char *argv[]) {
 
     divert_update_ipfw(handle, "ip from any to not 0.0.0.255:24 via en0");
 
-    if (errmsg[0]) {
-        puts(errmsg);
+    if (handle->errmsg[0]) {
+        puts(handle->errmsg);
         exit(EXIT_FAILURE);
     }
 

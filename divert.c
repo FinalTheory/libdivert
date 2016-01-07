@@ -320,6 +320,13 @@ int divert_dump_pcap(struct ip *packet, FILE *fp) {
 int divert_activate(divert_t *divert_handle) {
     // clean error message
     divert_handle->errmsg[0] = 0;
+
+    // first check if it is already looping
+    if (divert_handle->is_looping) {
+        sprintf(divert_handle->errmsg, "Is already looping.");
+        return INVALID_FAILURE;
+    }
+
     int status = 0;
 
     // check if KEXT is loaded
@@ -434,6 +441,34 @@ static void *divert_thread_callback(void *arg) {
     return NULL;
 }
 
+static void divert_loop_finish(divert_t *handle) {
+    // first clean firewall rule
+    ipfw_delete(handle->ipfw_id, handle->errmsg);
+
+    // then re-inject all buffered packets
+    while (!circ_buf_is_empty(handle->thread_buffer)) {
+        packet_info_t *packet = circ_buf_remove(handle->thread_buffer);
+        if (packet == NULL) { continue; }
+        if (packet->flag & DIVERT_RAW_IP_PACKET) {
+            divert_reinject(handle, packet->ip_data, -1, &packet->sin);
+            free(packet->ip_data);
+        }
+        free(packet);
+    }
+
+    // finally send a message to tell that loop is really stopped
+    write(handle->exit_fd[1], "e", 1);
+}
+
+static void divert_check_loop_finished(divert_t *handle) {
+    if (handle->flags & DIVERT_IS_LOOPED) {
+        char str_buf[PIPE_BUFFER_SIZE];
+        read(handle->exit_fd[0], str_buf, sizeof(str_buf));
+        assert(str_buf[0] == 'e');
+        handle->flags &= ~((u_int32_t)DIVERT_IS_LOOPED);
+    }
+}
+
 static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
     // return value of thread
     void *ret_val;
@@ -515,12 +550,8 @@ static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
         pthread_join(*divert_thread_callback_handle, &ret_val);
     }
 
-    char exit_str[] = "success";
-    write(divert_handle->exit_fd[1], exit_str, sizeof(exit_str));
-    // call divert_loop_stop() to clear ipfw rule
-    if (count > 0) {
-        divert_loop_stop(divert_handle);
-    }
+    // call divert_loop_finish() to clear ipfw rule
+    divert_loop_finish(divert_handle);
 }
 
 static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
@@ -620,7 +651,7 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
                     // end the event loop
                     char pipe_buf[PIPE_BUFFER_SIZE];
                     read(divert_handle->pipe_fd[0], pipe_buf, sizeof(pipe_buf));
-                    if (pipe_buf[0] == 'e') {
+                    if (pipe_buf[0] == 'q') {
                         goto finish;
                     }
                 }
@@ -638,12 +669,8 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
         pthread_join(*divert_thread_callback_handle, &ret_val);
     }
 
-    char exit_str[] = "success";
-    write(divert_handle->exit_fd[1], exit_str, sizeof(exit_str));
-    // call divert_loop_stop() to clear ipfw rule
-    if (count > 0) {
-        divert_loop_stop(divert_handle);
-    }
+    // call divert_loop_finish() to clear ipfw rule
+    divert_loop_finish(divert_handle);
 }
 
 typedef void (*divert_loop_func_t)(divert_t *, int);
@@ -663,6 +690,12 @@ void *divert_non_block_thread(void *args) {
 
 int divert_loop(divert_t *divert_handle, int count) {
     divert_handle->errmsg[0] = 0;
+
+    // wait until previous looping is exited
+    divert_check_loop_finished(divert_handle);
+
+    // set a flag
+    divert_handle->flags |= DIVERT_IS_LOOPED;
 
     // setup firewall to redirect all traffic to divert socket
     if (ipfw_setup(divert_handle->ipfw_filter,
@@ -809,10 +842,9 @@ int divert_is_looping(divert_t *handle) {
     return handle->is_looping;
 }
 
-static void *_divert_loop_stop_func(void *args) {
-    char pipe_buf[] = "exit";
-    divert_t *handle = (divert_t *)args;
-    handle->errmsg[0] = 0;
+void divert_loop_stop(divert_t *handle) {
+    // if not looping, just return
+    if (!handle->is_looping) { return; }
 
     // set loop flag to zero
     handle->is_looping = 0;
@@ -820,42 +852,15 @@ static void *_divert_loop_stop_func(void *args) {
     // write message to PIPE to break loop
     if (DIVERT_FLAG_FAST_EXIT) {
         // write data into pipe to exit event loop
-        write(handle->pipe_fd[1], pipe_buf, sizeof(pipe_buf));
+        write(handle->pipe_fd[1], "q", 1);
     }
-
-    // guard here to wait until event loop is stopped
-    char str_buf[PIPE_BUFFER_SIZE];
-    read(handle->exit_fd[0], str_buf, sizeof(str_buf));
-    assert(str_buf[0] == 's');
-
-    // clean firewall rule
-    ipfw_delete(handle->ipfw_id, handle->errmsg);
-
-    // finally re-inject all buffered packets
-    while (!circ_buf_is_empty(handle->thread_buffer)) {
-        packet_info_t *packet = circ_buf_remove(handle->thread_buffer);
-        if (packet == NULL) { continue; }
-        if (packet->flag & DIVERT_RAW_IP_PACKET) {
-            divert_reinject(handle, packet->ip_data, -1, &packet->sin);
-            free(packet->ip_data);
-        }
-        free(packet);
-    }
-
-    return NULL;
-}
-
-void divert_loop_stop(divert_t *handle) {
-    // the signal interrupts execution of main thread
-    // so we need to start a new thread to to this
-    pthread_t non_block_thread;
-    pthread_create(&non_block_thread, NULL,
-                   _divert_loop_stop_func, handle);
-    pthread_detach(non_block_thread);
 }
 
 int divert_close(divert_t *divert_handle) {
     divert_handle->errmsg[0] = 0;
+
+    // first wait until divert loop is exited
+    divert_check_loop_finished(divert_handle);
 
     // close the divert socket and free the buffer
     close(divert_handle->divert_fd);

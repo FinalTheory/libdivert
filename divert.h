@@ -20,6 +20,7 @@ extern "C" {
 #define CALLBACK_NOT_FOUND  -5
 #define PIPE_OPEN_FAILURE   -6
 #define NIDS_FAILURE        -7
+#define INVALID_FAILURE     -8
 
 /*
  * default packet parameters
@@ -31,7 +32,7 @@ extern "C" {
 // some default buffer size
 // warning: PACKET_BUFFER_SIZE should never be greater than SEM_VALUE_MAX
 #define PACKET_BUFFER_SIZE      8192
-#define PIPE_BUFFER_SIZE        8
+#define PIPE_BUFFER_SIZE        32
 #define DIVERT_ERRBUF_SIZE      256
 #define DIVERT_DEFAULT_BUFSIZE  524288
 
@@ -40,7 +41,7 @@ extern "C" {
  * you can choose to use extended information
  * or just divert the raw IP packets
  */
-
+#define DIVERT_IS_LOOPED         (1u)
 #define DIVERT_FLAG_FAST_EXIT    (1u << 1)
 #define DIVERT_FLAG_BLOCK_IO     (1u << 2)
 #define DIVERT_FLAG_TCP_REASSEM  (1u << 3)
