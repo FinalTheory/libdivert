@@ -81,7 +81,7 @@ void tcp_callback(struct tcp_stream *a_tcp, void **this_time_not_needed) {
 
 #define MAX_PACKET_SIZE 65535
 
-u_char packet_buf[MAX_PACKET_SIZE];
+u_char packet_buf[MAX_PACKET_SIZE + 10];
 u_char sin_buf[sizeof(struct sockaddr) + 10];
 u_char proc_info_buf[sizeof(proc_info_t) + 10];
 divert_t *handle;
@@ -117,7 +117,7 @@ int main(int argc, char *argv[]) {
     printf("Packet buffer size: %zu\n", handle->bufsize);
 
     // call the non-blocking main loop
-    divert_loop(handle, -1);
+    printf("Divert Loop Start Status: %d\n", divert_loop(handle, -1));
 
     // register callback function
     nids_register_tcp(tcp_callback);

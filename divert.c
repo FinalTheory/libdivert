@@ -691,6 +691,8 @@ int divert_loop(divert_t *divert_handle, int count) {
         pthread_create(&non_block_thread, NULL,
                        divert_non_block_thread, args);
         pthread_detach(non_block_thread);
+        // wait until the main loop is started
+        while (!divert_handle->is_looping);
     } else {
         loop_function(divert_handle, count);
     }
@@ -862,7 +864,7 @@ int divert_close(divert_t *divert_handle) {
         circ_buf_destroy(divert_handle->thread_buffer);
     }
 
-    // close the kext communication describpor
+    // close the kext communication descriptor
     close(divert_handle->kext_fd);
     // close the pipe descriptor
     close(divert_handle->pipe_fd[0]);

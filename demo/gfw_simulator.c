@@ -41,9 +41,6 @@ divert_t *handle;
 
 
 int main(int argc, char *argv[]) {
-    // set random seed
-    srand((u_int)time(NULL));
-
     // extract process PID
     if (argc == 3) {
         pid = atoi(argv[1]);
