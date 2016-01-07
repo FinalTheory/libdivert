@@ -24,8 +24,6 @@ disorder_pipe_insert(pipe_node_t *node,
     do {
         // do not process this packet if this is a timeout signal
         if (packet->label != NEW_PACKET) { break; }
-        // check if packet direction is legal
-        if (packet->direction == DIRECTION_UNKNOWN) { break; }
         // update packet counter
         pipe->packet_cnt[packet->direction]++;
         // then check packet size

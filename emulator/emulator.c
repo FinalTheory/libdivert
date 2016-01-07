@@ -161,6 +161,7 @@ void *emulator_timer_thread_func(void *args) {
         }
 
         // then wait until next timeout event
+        // or a new timer is set
         if (pqueue_size(config->timer_queue) > 0) {
             ptr = pqueue_head(config->timer_queue);
             if (time_greater_than(&ptr->tv, &time_now)) {
@@ -216,6 +217,18 @@ void *emulator_thread_func(void *args) {
                  node = node->next) {
                 if (NULL != node->process) {
                     node->process(node);
+                }
+            }
+        } else if (packet->label == TIMEOUT_EVENT) {
+            for (int dir = 0; dir < 2; dir++) {
+                if (config->pipe[dir] != NULL) {
+                    config->pipe[dir]->insert(config->pipe[dir], packet);
+                    for (node = config->pipe[dir]; node;
+                         node = node->next) {
+                        if (NULL != node->process) {
+                            node->process(node);
+                        }
+                    }
                 }
             }
         }

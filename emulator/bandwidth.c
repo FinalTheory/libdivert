@@ -64,12 +64,19 @@ bandwidth_pipe_process(pipe_node_t *node) {
     bandwidth_pipe_t *pipe = container_of(node, bandwidth_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
+    struct timezone tz;
+    struct timeval time_now;
+
     while (circ_buf_size(pipe->buffer) > 0) {
         bandwidth_packet_t *ptr = circ_buf_head(pipe->buffer);
-        if (!ptr->is_registered) {
-            // register timeout event
-            register_timer(node, &ptr->time_send);
-            ptr->is_registered = 1;
+        gettimeofday(&time_now, &tz);
+        if (time_greater_than(&ptr->time_send, &time_now)) {
+            if (!ptr->is_registered) {
+                // register timeout event
+                register_timer(node, &ptr->time_send);
+                ptr->is_registered = 1;
+            }
+            break;
         }
         // then send them to next pipe
         ptr = circ_buf_remove(pipe->buffer);
