@@ -60,6 +60,10 @@ int divert_set_error_handler(divert_t *handle, divert_error_handler_t handler) {
 }
 
 int divert_set_callback(divert_t *handle, divert_callback_t callback, void *args) {
+    if (callback == NULL) {
+        sprintf(handle->errmsg, "Callback function should not be NULL.");
+        return -1;
+    }
     handle->callback = callback;
     handle->callback_args = args;
     return 0;
@@ -460,7 +464,7 @@ static void divert_loop_finish(divert_t *handle) {
     write(handle->exit_fd[1], "e", 1);
 }
 
-static void divert_check_loop_finished(divert_t *handle) {
+void divert_wait_loop_finish(divert_t *handle) {
     if (handle->flags & DIVERT_IS_LOOPED) {
         char str_buf[PIPE_BUFFER_SIZE];
         read(handle->exit_fd[0], str_buf, sizeof(str_buf));
@@ -692,7 +696,7 @@ int divert_loop(divert_t *divert_handle, int count) {
     divert_handle->errmsg[0] = 0;
 
     // wait until previous looping is exited
-    divert_check_loop_finished(divert_handle);
+    divert_wait_loop_finish(divert_handle);
 
     // set a flag
     divert_handle->flags |= DIVERT_IS_LOOPED;
@@ -860,7 +864,7 @@ int divert_close(divert_t *divert_handle) {
     divert_handle->errmsg[0] = 0;
 
     // first wait until divert loop is exited
-    divert_check_loop_finished(divert_handle);
+    divert_wait_loop_finish(divert_handle);
 
     // close the divert socket and free the buffer
     close(divert_handle->divert_fd);

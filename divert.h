@@ -190,6 +190,8 @@ int divert_is_looping(divert_t *handle);
 
 void divert_loop_stop(divert_t *handle);
 
+void divert_wait_loop_finish(divert_t *handle);
+
 /*
  * this function *SHOULD* be called within the thread you call divert_loop()
  * but *NOT* in the thread you call divert_loop_stop() !
