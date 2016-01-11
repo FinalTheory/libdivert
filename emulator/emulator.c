@@ -2,6 +2,11 @@
 #include "dump_packet.h"
 #include "throttle.h"
 #include "reinject.h"
+#include "drop.h"
+#include "disorder.h"
+#include "biterr.h"
+#include "bandwidth.h"
+#include "duplicate.h"
 
 #include <string.h>
 
@@ -501,14 +506,19 @@ int emulator_config_check(emulator_config_t *config, char *errmsg) {
     }
     for (int dir = 0; dir < 2; dir++) {
         for (pipe_node_t *cur = config->pipe[dir];
-             cur; cur = cur->next) {
+             cur != NULL && cur != config->exit_pipe;
+             cur = cur->next) {
+            float *t = NULL, *val = NULL;
             switch (cur->pipe_type) {
-                case PIPE_DROP:
+                case PIPE_REINJECT: {
+                    reinject_pipe_t *pipe = container_of(cur, reinject_pipe_t, node);
+                    if (pipe->handle == NULL) {
+                        sprintf(errmsg, "Divert handle could not be NULL.");
+                        return -1;
+                    }
+                }
                     break;
-                case PIPE_DELAY:
-                    break;
-                case PIPE_THROTTLE:
-                {
+                case PIPE_THROTTLE: {
                     throttle_pipe_t *pipe = container_of(cur, throttle_pipe_t, node);
                     float *t1 = pipe->t_start;
                     float *t2 = pipe->t_end;
@@ -529,40 +539,54 @@ int emulator_config_check(emulator_config_t *config, char *errmsg) {
                     }
                 }
                     break;
-                case PIPE_DISORDER:
-                    break;
-                case PIPE_BITERR:
-                    break;
-                case PIPE_BANDWIDTH:
-                    break;
-                case PIPE_REINJECT:
-                    break;
-                case PIPE_DUPLICATE:
+                case PIPE_DROP: {
+                    drop_pipe_t *pipe = container_of(cur, drop_pipe_t, node);
+                    t = pipe->t;
+                    val = pipe->drop_rate;
+                }
+                case PIPE_DELAY: {
+                    delay_pipe_t *pipe = container_of(cur, delay_pipe_t, node);
+                    t = pipe->t;
+                    val = pipe->delay_time;
+                }
+                case PIPE_DISORDER: {
+                    disorder_pipe_t *pipe = container_of(cur, disorder_pipe_t, node);
+                    t = pipe->t;
+                    val = pipe->disorder_rate;
+                }
+                case PIPE_BITERR: {
+                    biterr_pipe_t *pipe = container_of(cur, biterr_pipe_t, node);
+                    t = pipe->t;
+                    val = pipe->biterr_rate;
+                }
+                case PIPE_BANDWIDTH: {
+                    bandwidth_pipe_t *pipe = container_of(cur, bandwidth_pipe_t, node);
+                    t = pipe->t;
+                    val = pipe->bandwidth;
+                }
+                case PIPE_DUPLICATE: {
+                    duplicate_pipe_t *pipe = container_of(cur, duplicate_pipe_t, node);
+                    t = pipe->t;
+                    val = pipe->dup_rate;
+                }
+                    if (t == NULL ||
+                        val == NULL ||
+                        cur->num == 0) {
+                        sprintf(errmsg, "Effect data not set.");
+                        return -1;
+                    }
+                    if (t[0] > FLOAT_EPS) {
+                        sprintf(errmsg, "Each periodic function should start from time zero.");
+                        return -1;
+                    }
                     break;
                 default:
-                    break;
+                    sprintf(errmsg, "Unknown PIPE flag.");
+                    return -1;
             }
         }
     }
 
-//    for (int i = 0; i < EMULATOR_EFFECTS; i++) {
-//        if (config->flags & flags[i]) {
-//            if (config->t[i] == NULL ||
-//                config->val[i] == NULL ||
-//                config->num[i] == 0) {
-//                sprintf(errmsg, "Effect data not set.");
-//                return -1;
-//            }
-//            if (i != OFFSET_THROTTLE &&
-//                config->t[i][0] > FLOAT_EPS) {
-//                sprintf(errmsg, "Each periodic function should start from time zero.");
-//                return -1;
-//            }
-//            if (i == OFFSET_THROTTLE) {
-//
-//            }
-//        }
-//    }
     if (config->flags & EMULATOR_DUMP_PCAP) {
         if (config->dump_path == NULL ||
             config->dump_normal == NULL ||

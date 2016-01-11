@@ -37,7 +37,7 @@ float biterr_rate[DATA_LEN] = {0.000, 0.008, 0.016, 0.024, 0.032, 0.039, 0.047, 
 float duplicate_rate[DATA_LEN] = {0.000, 0.008, 0.016, 0.024, 0.032, 0.039, 0.047, 0.055, 0.063, 0.071, 0.079, 0.086, 0.094, 0.102, 0.110, 0.117, 0.125, 0.133, 0.140, 0.148, 0.155, 0.163, 0.170, 0.178, 0.185, 0.192, 0.200, 0.207, 0.214, 0.221, 0.228, 0.235, 0.242, 0.249, 0.256, 0.262, 0.269, 0.276, 0.282, 0.289, 0.295, 0.302, 0.308, 0.314, 0.320, 0.326, 0.332, 0.338, 0.344, 0.349, 0.355, 0.360, 0.366, 0.371, 0.376, 0.382, 0.387, 0.392, 0.396, 0.401, 0.406, 0.410, 0.415, 0.419, 0.424, 0.428, 0.432, 0.436, 0.439, 0.443, 0.447, 0.450, 0.454, 0.457, 0.460, 0.463, 0.466, 0.469, 0.471, 0.474, 0.476, 0.479, 0.481, 0.483, 0.485, 0.487, 0.489, 0.490, 0.492, 0.493, 0.494, 0.496, 0.496, 0.497, 0.498, 0.499, 0.499, 0.500, 0.500, 0.500, 0.500, 0.500, 0.500, 0.499, 0.499, 0.498, 0.497, 0.496, 0.496, 0.494, 0.493, 0.492, 0.490, 0.489, 0.487, 0.485, 0.483, 0.481, 0.479, 0.476, 0.474, 0.471, 0.469, 0.466, 0.463, 0.460, 0.457, 0.454, 0.450, 0.447, 0.443, 0.439, 0.436, 0.432, 0.428, 0.424, 0.419, 0.415, 0.410, 0.406, 0.401, 0.396, 0.392, 0.387, 0.382, 0.376, 0.371, 0.366, 0.360, 0.355, 0.349, 0.344, 0.338, 0.332, 0.326, 0.320, 0.314, 0.308, 0.302, 0.295, 0.289, 0.282, 0.276, 0.269, 0.262, 0.256, 0.249, 0.242, 0.235, 0.228, 0.221, 0.214, 0.207, 0.200, 0.192, 0.185, 0.178, 0.170, 0.163, 0.155, 0.148, 0.140, 0.133, 0.125, 0.117, 0.110, 0.102, 0.094, 0.086, 0.079, 0.071, 0.063, 0.055, 0.047, 0.039, 0.032, 0.024, 0.016, 0.008, 0.000,};
 
 float bandwidth_t[2] = {0, 10};
-float bandwidth_val[2] = {1024, 1024};
+float bandwidth_val[2] = {512, 512};
 
 float throttle_start[] = {0.5, 1.3, 2.5, 3.6, 5.4, 7.1, 9.6, 15};
 float throttle_end[] = {0.9, 1.8, 2.9, 4.3, 6.0, 7.9, 10.0, 17};
@@ -74,14 +74,26 @@ int main(int argc, char *argv[]) {
     pipe_node_t *drop_pipe =
             drop_pipe_create(NULL, DATA_LEN, t, drop_rate);
 
+    pipe_node_t *bandwidth_pipe =
+            bandwidth_pipe_create(NULL, 2, bandwidth_t, bandwidth_val, 8192);
+
+    pipe_node_t *delay_pipe =
+            delay_pipe_create(NULL, DATA_LEN, t, delay_time, 65535);
+
+    pipe_node_t *disorder_pipe =
+            disorder_pipe_create(NULL, DATA_LEN, t, disorder_rate, 65535, 10);
+
     emulator_set_pid_list(config, pids, 1);
 
     emulator_add_flag(config, EMULATOR_RECHECKSUM);
 
     emulator_add_pipe(config, throttle_pipe, DIRECTION_IN);
-    emulator_add_pipe(config, drop_pipe, DIRECTION_IN);
+//    emulator_add_pipe(config, drop_pipe, DIRECTION_IN);
+//    emulator_add_pipe(config, bandwidth_pipe, DIRECTION_IN);
+//    emulator_add_pipe(config, disorder_pipe, DIRECTION_IN);
+//    emulator_add_pipe(config, delay_pipe, DIRECTION_IN);
 
-    // emulator_set_dump_pcap(config, "/Users/baidu/Downloads");
+    emulator_set_dump_pcap(config, "/Users/baidu/Downloads");
 
     if (emulator_config_check(config, errmsg)) {
         puts(errmsg);
