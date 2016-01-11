@@ -176,7 +176,7 @@ struct emulator {
 
 
 /*
- * Helper functions
+ * Internal functions
  */
 
 double rand_double();
@@ -201,13 +201,13 @@ void
 register_timer(pipe_node_t *node,
                struct timeval *tv);
 
+void *emulator_thread_func(void *args);
+
 /*
  * Interfaces
  */
 
 void emulator_callback(void *, void *, struct ip *, struct sockaddr *);
-
-void *emulator_thread_func(void *args);
 
 emulator_config_t *
 emulator_create_config(divert_t *handle,
@@ -222,7 +222,8 @@ void emulator_stop(emulator_config_t *config);
 int emulator_add_pipe(emulator_config_t *config,
                       pipe_node_t *node, int direction);
 
-int emulator_del_pipe(emulator_config_t *config, pipe_node_t *node);
+int emulator_del_pipe(emulator_config_t *config,
+                      pipe_node_t *node, int free_mem);
 
 void emulator_add_flag(emulator_config_t *config, uint64_t new_flag);
 

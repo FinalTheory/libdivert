@@ -629,7 +629,7 @@ int emulator_add_pipe(emulator_config_t *config,
 }
 
 int emulator_del_pipe(emulator_config_t *config,
-                      pipe_node_t *node) {
+                      pipe_node_t *node, int free_mem) {
     // the exit pipe should never be deleted
     if (node == config->exit_pipe) {
         return -1;
@@ -639,6 +639,10 @@ int emulator_del_pipe(emulator_config_t *config,
              *ptr != NULL && *ptr != config->exit_pipe;) {
             pipe_node_t *entry = *ptr;
             if (entry == node) {
+                if (free_mem) {
+                    if (entry->clear != NULL) { entry->clear(entry); }
+                    if (entry->free != NULL) { entry->free(entry); }
+                }
                 *ptr = entry->next;
             } else {
                 ptr = &entry->next;
