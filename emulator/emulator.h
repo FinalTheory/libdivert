@@ -28,6 +28,7 @@ enum {
 
 };
 
+// TODO: add event driven mode
 enum {
     MODE_TIME_DRIVEN = 0,
     MODE_EVENT_DRIVEN = 1,
@@ -37,7 +38,6 @@ enum {
     NEW_PACKET = 0,
     TIMEOUT_EVENT = 1,
     EVENT_QUIT = 2,
-    BYPASS_PACKET = 3,
 };
 
 
@@ -158,7 +158,7 @@ struct emulator {
      * first node of processing pipes
      * and a exit pipe
      */
-    pipe_node_t *pipe[2];
+    pipe_node_t *pipe[3];
     pipe_node_t *exit_pipe;
 
     /*

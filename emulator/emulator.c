@@ -204,10 +204,6 @@ void *emulator_thread_func(void *args) {
         if (packet->label == EVENT_QUIT) {
             // quit event, just break
             break;
-        } else if (packet->label == BYPASS_PACKET) {
-            // a packet that won't match any rule
-            // just insert it into exit pipe
-            config->exit_pipe->insert(config->exit_pipe, packet);
         } else if (packet->label == NEW_PACKET) {
             int dir = packet->direction;
             // insert packet into first pipe
@@ -324,12 +320,6 @@ void emulator_callback(void *args, void *proc,
      * or the direction of this packet is unknown
      * then we mark it as a special packet type
      */
-    if (direction == DIRECTION_UNKNOWN ||
-        config->pipe[direction] == NULL) {
-        packet->label = BYPASS_PACKET;
-    } else {
-        packet->label = NEW_PACKET;
-    }
     packet->sin = *sin;
     packet->direction = direction;
     packet->proc_info = *((proc_info_t *)proc);
@@ -370,10 +360,12 @@ emulator_config_t *emulator_create_config(divert_t *handle,
     config->emulator_thread = (pthread_t)-1;
     config->timer_thread = (pthread_t)-1;
 
-    config->pipe[DIRECTION_IN] = NULL;
-    config->pipe[DIRECTION_OUT] = NULL;
     config->exit_pipe = reinject_pipe_create(handle);
     config->exit_pipe->config = config;
+
+    config->pipe[DIRECTION_IN] = config->exit_pipe;
+    config->pipe[DIRECTION_OUT] = config->exit_pipe;
+    config->pipe[DIRECTION_UNKNOWN] = config->exit_pipe;
 
     config->packet_queue = circ_buf_create(buf_size, 1);
     config->timer_queue = pqueue_new(cmp_time_event, TIMER_QUEUE_SIZE, 1);
@@ -599,7 +591,7 @@ int emulator_add_pipe(emulator_config_t *config,
 
     node->config = config;
     node->next = config->exit_pipe;
-    if (config->pipe[direction] == NULL) {
+    if (config->pipe[direction] == config->exit_pipe) {
         config->pipe[direction] = node;
     } else {
         pipe_node_t *ptr = config->pipe[direction];
@@ -620,7 +612,7 @@ int emulator_del_pipe(emulator_config_t *config,
     }
     for (int dir = 0; dir < 2; dir++) {
         for (pipe_node_t **ptr = &config->pipe[dir];
-             *ptr;) {
+             *ptr != NULL && *ptr != config->exit_pipe;) {
             pipe_node_t *entry = *ptr;
             if (entry == node) {
                 *ptr = entry->next;

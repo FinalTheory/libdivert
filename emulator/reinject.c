@@ -7,8 +7,7 @@ reinject_pipe_insert(pipe_node_t *node,
                      emulator_packet_t *packet) {
 
     // if this is an event, just return
-    if (packet->label != NEW_PACKET &&
-        packet->label != BYPASS_PACKET) { return; }
+    if (packet->label != NEW_PACKET) { return; }
 
     // or, we re-inject this packet into IP stack
     reinject_pipe_t *pipe = container_of(node, reinject_pipe_t, node);
