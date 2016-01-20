@@ -92,7 +92,7 @@ bandwidth_pipe_clear(pipe_node_t *node) {
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
     while (circ_buf_size(pipe->buffer) > 0) {
-        bandwidth_packet_t *ptr = circ_buf_head(pipe->buffer);
+        bandwidth_packet_t *ptr = circ_buf_remove(pipe->buffer);
         next_pipe_insert(node->next, ptr->packet);
         CHECK_AND_FREE(ptr)
     }
