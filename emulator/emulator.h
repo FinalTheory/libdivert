@@ -159,6 +159,7 @@ struct emulator {
      * and a exit pipe
      */
     pipe_node_t *pipe[3];
+    uint64_t dsize[3];
     pipe_node_t *exit_pipe;
 
     /*
