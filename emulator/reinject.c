@@ -13,6 +13,8 @@ reinject_pipe_insert(pipe_node_t *node,
     reinject_pipe_t *pipe = container_of(node, reinject_pipe_t, node);
     emulator_config_t *config = node->config;
     divert_reinject(pipe->handle, packet->ip_data, -1, &packet->sin);
+    // update size counter of diverted packet
+    config->dsize[packet->direction] += packet->headers.size_payload;
     // dump this packet if needed
     if (config->flags & EMULATOR_DUMP_PCAP) {
         divert_dump_pcap(packet->ip_data,

@@ -220,6 +220,8 @@ void emulator_start(emulator_config_t *config);
 
 void emulator_stop(emulator_config_t *config);
 
+uint64_t emulator_data_size(emulator_config_t *config, int direction);
+
 int emulator_add_pipe(emulator_config_t *config,
                       pipe_node_t *node, int direction);
 

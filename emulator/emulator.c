@@ -211,8 +211,6 @@ void *emulator_thread_func(void *args) {
             break;
         } else if (packet->label == NEW_PACKET) {
             int dir = packet->direction;
-            // update size counter of diverted packet
-            config->dsize[dir] += packet->headers.size_payload;
             // insert packet into first pipe
             config->pipe[dir]->insert(config->pipe[dir], packet);
             // process each pipe if it has process function
