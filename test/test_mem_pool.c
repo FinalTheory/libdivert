@@ -32,8 +32,10 @@ void *thread_func(void *p) {
                 *res = 1;
             }
         }
-        // finally free the memory
-        divert_mem_free(pool, buf);
+        // randomly free the memory
+        if (rand() % 2) {
+            divert_mem_free(pool, buf);
+        }
     }
     return res;
 }
@@ -55,6 +57,8 @@ int main() {
     }
     if (*(int *)res == 0) {
         puts("Success");
+        printf("Num reused: %zu, num new allocated: %zu\n",
+               pool->num_reuse, pool->num_alloc);
         divert_destroy_pool(pool);
     } else {
         puts("Failed");

@@ -15,6 +15,9 @@ struct divert_mem_block_s {
 
 typedef struct {
     divert_mem_block_t **pool;
+    size_t num_alloc;
+    size_t num_reuse;
+    size_t num_failed;
     size_t max;
 } divert_mem_pool_t;
 

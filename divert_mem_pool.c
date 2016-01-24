@@ -14,6 +14,9 @@ divert_mem_pool_t *divert_create_pool(size_t max_alloc) {
         return NULL;
     }
     pool->max = max_alloc;
+    pool->num_alloc = 0;
+    pool->num_reuse = 0;
+    pool->num_failed = 0;
     return pool;
 }
 
@@ -47,6 +50,8 @@ void *divert_mem_alloc(divert_mem_pool_t *pool, size_t size) {
     // if got a block of memory, just return it
     if (block != NULL) {
         block->next = NULL;
+        // update number of reused blocks
+        __sync_fetch_and_add(&pool->num_reuse, 1);
         return (void *)block + sizeof(divert_mem_block_t);
     }
     // if not, we allocate a new block of memory
@@ -54,9 +59,12 @@ void *divert_mem_alloc(divert_mem_pool_t *pool, size_t size) {
     if (p != NULL) {
         block = p;
         block->size = size;
+        // update number of new allocated blocks
+        __sync_fetch_and_add(&pool->num_alloc, 1);
         return p + sizeof(divert_mem_block_t);
     } else {
         // return NULL if allocation failed
+        __sync_fetch_and_add(&pool->num_failed, 1);
         return NULL;
     }
 }
