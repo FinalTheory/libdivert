@@ -18,6 +18,7 @@ link_directories(/usr/local/lib)
 include_directories(SYSTEM ./libnids ./include ./)
 
 set(LIB_SOURCE_FILES
+        divert_mem_pool.c
         divert.c
         divert_ipfw.c
         print_data.c
@@ -55,4 +56,5 @@ set_target_properties(divert PROPERTIES LINK_FLAGS -all_load SUFFIX ".so")
 
 # below executables are demos
 add_subdirectory(demo)
+add_subdirectory(test)
 add_subdirectory(emulator)
