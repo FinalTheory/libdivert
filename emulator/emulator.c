@@ -11,8 +11,7 @@
 #include <string.h>
 
 
-inline void
-swap(void **a, void **b) {
+void swap(void **a, void **b) {
     void *tmp = *b;
     *b = *a;
     *a = tmp;

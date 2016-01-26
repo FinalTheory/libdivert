@@ -36,6 +36,11 @@ divert_t *divert_create(int port_number, u_int32_t flags) {
     // all pointers in divert_handle would be NULL
     memset(divert_handle, 0, sizeof(divert_t));
 
+    divert_handle->pool = divert_create_pool(DEFAULT_PACKET_SIZE);
+    if (divert_handle->pool == NULL) {
+        free(divert_handle);
+        return NULL;
+    }
     divert_handle->flags = flags;
     divert_handle->divert_port = port_number;
     divert_handle->thread_buffer_size = PACKET_BUFFER_SIZE;
@@ -142,7 +147,8 @@ static int divert_init_divert_socket(divert_t *divert_handle) {
         divert_handle->bufsize = DIVERT_DEFAULT_BUFSIZE;
     }
     // finally allocate memory for divert buffer
-    divert_handle->divert_buffer = malloc((size_t)divert_handle->bufsize);
+    divert_handle->divert_buffer = divert_mem_alloc(divert_handle->pool,
+                                                    (size_t)divert_handle->bufsize);
     memset(divert_handle->divert_buffer, 0, (size_t)divert_handle->bufsize);
 
     return 0;
@@ -375,7 +381,8 @@ int divert_activate(divert_t *divert_handle) {
     // because of the checksum offload mechanism
     // so we need to disable that procedure
     struct nids_chksum_ctl *chksum_ctl =
-            malloc(sizeof(struct nids_chksum_ctl));
+            divert_mem_alloc(divert_handle->pool,
+                             sizeof(struct nids_chksum_ctl));
     memset(chksum_ctl, 0, sizeof(struct nids_chksum_ctl));
     chksum_ctl->action = NIDS_DONT_CHKSUM;
     nids_register_chksum_ctl(chksum_ctl, 1);
@@ -387,8 +394,11 @@ int divert_activate(divert_t *divert_handle) {
     return 0;
 }
 
-static inline packet_info_t *divert_new_error_packet(u_int64_t flag) {
-    packet_info_t *new_packet = malloc(sizeof(packet_info_t));
+static inline
+packet_info_t *divert_new_error_packet(divert_t *handle,
+                                       u_int64_t flag) {
+    packet_info_t *new_packet =
+            divert_mem_alloc(handle->pool, sizeof(packet_info_t));
     new_packet->ip_data = NULL;
     new_packet->flag = flag;
     return new_packet;
@@ -426,8 +436,8 @@ static void *divert_thread_callback(void *arg) {
             }
             callback(callback_args, &packet->proc_info,
                      packet->ip_data, &packet->sin);
-            free(packet->ip_data);
-            free(packet);
+            divert_mem_free(handle->pool, packet->ip_data);
+            divert_mem_free(handle->pool, packet);
         } else if (packet->flag &
                    (DIVERT_ERROR_DIVERT_NODATA |
                     DIVERT_ERROR_KQUEUE)) {
@@ -435,9 +445,9 @@ static void *divert_thread_callback(void *arg) {
             if (handle->err_handler != NULL) {
                 handle->err_handler(packet->flag);
             }
-            free(packet);
+            divert_mem_free(handle->pool, packet);
         } else if (packet->flag & DIVERT_STOP_LOOP) {
-            free(packet);
+            divert_mem_free(handle->pool, packet);
             break;
         }
     }
@@ -455,9 +465,9 @@ static void divert_loop_finish(divert_t *handle) {
         if (packet == NULL) { continue; }
         if (packet->flag & DIVERT_RAW_IP_PACKET) {
             divert_reinject(handle, packet->ip_data, -1, &packet->sin);
-            free(packet->ip_data);
+            divert_mem_free(handle->pool, packet->ip_data);
         }
-        free(packet);
+        divert_mem_free(handle->pool, packet);
     }
 
     // finally send a message to tell that loop is really stopped
@@ -512,11 +522,12 @@ static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
             if (packet_hdrs.size_ip) {
                 // if packet is not found in the queue, then just send it to user
                 size_t ip_length = ntohs(packet_hdrs.ip_hdr->ip_len);
-                packet_info_t *new_packet = malloc(sizeof(packet_info_t));
+                packet_info_t *new_packet = divert_mem_alloc(divert_handle->pool,
+                                                             sizeof(packet_info_t));
                 new_packet->sin = sin;
                 new_packet->flag = DIVERT_RAW_IP_PACKET;
                 // allocate memory
-                new_packet->ip_data = malloc(ip_length);
+                new_packet->ip_data = divert_mem_alloc(divert_handle->pool, ip_length);
                 divert_query_proc_by_packet(divert_handle,
                                             packet_hdrs.ip_hdr, &sin,
                                             &new_packet->proc_info);
@@ -532,12 +543,12 @@ static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
             } else {
                 // IP packet is invalid
                 circ_buf_insert(divert_handle->thread_buffer,
-                                divert_new_error_packet(DIVERT_ERROR_INVALID_IP));
+                                divert_new_error_packet(divert_handle, DIVERT_ERROR_INVALID_IP));
             }
         } else {
             // no valid data, so insert a flag into thread buffer
             circ_buf_insert(divert_handle->thread_buffer,
-                            divert_new_error_packet(DIVERT_ERROR_DIVERT_NODATA));
+                            divert_new_error_packet(divert_handle, DIVERT_ERROR_DIVERT_NODATA));
         }
         if (count > 0 && divert_handle->num_diverted > count) {
             goto finish;
@@ -547,7 +558,7 @@ static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
     divert_handle->is_looping = 0;
     // insert an item into the thread buffer to stop another thread
     circ_buf_insert(divert_handle->thread_buffer,
-                    divert_new_error_packet(DIVERT_STOP_LOOP));
+                    divert_new_error_packet(divert_handle, DIVERT_STOP_LOOP));
 
     if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
         // wait until the child thread is stopped
@@ -601,7 +612,7 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
 
         if (num_events == -1) {
             circ_buf_insert(divert_handle->thread_buffer,
-                            divert_new_error_packet(DIVERT_ERROR_KQUEUE));
+                            divert_new_error_packet(divert_handle, DIVERT_ERROR_KQUEUE));
         } else {
             for (int i = 0; i < num_events; i++) {
                 uintptr_t fd = events[i].ident;
@@ -621,11 +632,11 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
                         if (packet_hdrs.size_ip) {
                             // if packet is not found in the queue, then just send it to user
                             size_t ip_length = ntohs(packet_hdrs.ip_hdr->ip_len);
-                            packet_info_t *new_packet = malloc(sizeof(packet_info_t));
+                            packet_info_t *new_packet = divert_mem_alloc(divert_handle->pool, sizeof(packet_info_t));
                             new_packet->sin = sin;
                             new_packet->flag = DIVERT_RAW_IP_PACKET;
                             // allocate memory
-                            new_packet->ip_data = malloc(ip_length);
+                            new_packet->ip_data = divert_mem_alloc(divert_handle->pool, ip_length);
                             divert_query_proc_by_packet(divert_handle,
                                                         packet_hdrs.ip_hdr, &sin,
                                                         &new_packet->proc_info);
@@ -641,12 +652,12 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
                         } else {
                             // IP packet is invalid
                             circ_buf_insert(divert_handle->thread_buffer,
-                                            divert_new_error_packet(DIVERT_ERROR_INVALID_IP));
+                                            divert_new_error_packet(divert_handle, DIVERT_ERROR_INVALID_IP));
                         }
                     } else {
                         // no valid data, so insert a flag into thread buffer
                         circ_buf_insert(divert_handle->thread_buffer,
-                                        divert_new_error_packet(DIVERT_ERROR_DIVERT_NODATA));
+                                        divert_new_error_packet(divert_handle, DIVERT_ERROR_DIVERT_NODATA));
                     }
                     if (count > 0 && divert_handle->num_diverted > count) {
                         goto finish;
@@ -666,7 +677,7 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
     divert_handle->is_looping = 0;
     // insert an item into the thread buffer to stop another thread
     circ_buf_insert(divert_handle->thread_buffer,
-                    divert_new_error_packet(DIVERT_STOP_LOOP));
+                    divert_new_error_packet(divert_handle, DIVERT_STOP_LOOP));
 
     if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
         // wait until the child thread is stopped
@@ -720,7 +731,7 @@ int divert_loop(divert_t *divert_handle, int count) {
     // if use block IO, then
     // this function should be non-blocking
     if (divert_handle->flags & DIVERT_FLAG_BLOCK_IO) {
-        __tmp_data_t *args = malloc(sizeof(__tmp_data_t));
+        __tmp_data_t *args = divert_mem_alloc(divert_handle->pool, sizeof(__tmp_data_t));
         args->count = count;
         args->divert_handle = divert_handle;
         args->loop_function = loop_function;
@@ -777,17 +788,17 @@ ssize_t divert_read(divert_t *handle,
                 divert_feed_nids(packet->ip_data);
             }
             memcpy(proc_info_buf, &packet->proc_info, sizeof(proc_info_t));
-            // free the allocated memory
-            free(packet->ip_data);
-            free(packet);
+            // release the allocated memory
+            divert_mem_free(handle->pool, packet->ip_data);
+            divert_mem_free(handle->pool, packet);
             ret_val = 0;
         } else if (packet->flag &
                    (DIVERT_ERROR_DIVERT_NODATA |
                     DIVERT_ERROR_KQUEUE)) {
-            free(packet);
+            divert_mem_free(handle->pool, packet);
             ret_val = (int)packet->flag;
         } else if (packet->flag & DIVERT_STOP_LOOP) {
-            free(packet);
+            divert_mem_free(handle->pool, packet);
             handle->is_looping = 0;
             ret_val = DIVERT_READ_EOF;
         } else {
@@ -866,10 +877,11 @@ int divert_close(divert_t *divert_handle) {
     // first wait until divert loop is exited
     divert_wait_loop_finish(divert_handle);
 
-    // close the divert socket and free the buffer
+    // close the divert socket and release the buffer
     close(divert_handle->divert_fd);
     if (divert_handle->divert_buffer != NULL) {
-        free(divert_handle->divert_buffer);
+        divert_mem_free(divert_handle->pool,
+                        divert_handle->divert_buffer);
         circ_buf_destroy(divert_handle->thread_buffer);
     }
 

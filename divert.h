@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include "circ_buf.h"
+#include "divert_mem_pool.h"
 #include <stdio.h>
 #include <netinet/ip.h>
 #include "netinet/ip_fw.h"
@@ -25,6 +26,7 @@ extern "C" {
 /*
  * default packet parameters
  */
+#define DEFAULT_PACKET_SIZE     1520
 #define DEFAULT_IPFW_RULE_ID    1
 #define MAX_EVENT_COUNT         16
 #define NUM_TCP_STREAMS         2048
@@ -69,7 +71,7 @@ typedef void (*divert_signal_t)(int sig, void *data);
 
 typedef struct {
     u_int32_t flags;
-
+    divert_mem_pool_t *pool;
     /*
      * file descriptors
      */
