@@ -8,11 +8,12 @@
 
 #define MAX_LOOP    10000
 #define MEM_SIZE    1300
-#define NUM_THREADS 16
+#define NUM_THREADS 32
+
+int flag = 0;
 
 void *thread_func(void *p) {
     divert_mem_pool_t *pool = p;
-    int *res = calloc(sizeof(int), 1);
     u_char *data = calloc(MEM_SIZE, 1);
     // generate random data
     for (int i = 0; i < MEM_SIZE; i++) {
@@ -24,12 +25,13 @@ void *thread_func(void *p) {
         // copy private data of this thread
         memcpy(buf, data, MEM_SIZE);
         // sleep for up to 10 ms
-        usleep((useconds_t)rand() % 10000);
+        // usleep((useconds_t)rand() % 10000);
         // check if data in buffer is still right
         for (int j = 0; j < MEM_SIZE; j++) {
             if (((u_char *)buf)[j] != data[j]) {
-                puts("Fuck!");
-                *res = 1;
+                printf("Fuck, mem addr at offset %d: %p\n", j, buf);
+                flag = 1;
+                break;
             }
         }
         // randomly free the memory
@@ -37,9 +39,8 @@ void *thread_func(void *p) {
             divert_mem_free(pool, buf);
         }
     }
-    return res;
+    return NULL;
 }
-
 
 
 int main() {
@@ -55,7 +56,7 @@ int main() {
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_join(threads[i], &res);
     }
-    if (*(int *)res == 0) {
+    if (flag == 0) {
         puts("Success");
         printf("Num reused: %zu, num new allocated: %zu\n",
                pool->num_reuse, pool->num_alloc);
