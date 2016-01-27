@@ -133,6 +133,11 @@ int main(int argc, char *argv[]) {
     // output statics information
     printf("Diverted packets: %llu\n", handle->num_diverted);
 
+    printf("Num reused: %zu, num new allocated: %zu, num large: %zu\n",
+           config->pool->num_reuse,
+           config->pool->num_alloc,
+           config->pool->num_large);
+
     // clean the handle to release resources
     if (divert_close(handle) == 0) {
         puts("Successfully cleaned, exit.");

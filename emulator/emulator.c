@@ -331,8 +331,9 @@ void emulator_callback(void *args, void *proc,
     packet->sin = *sin;
     packet->direction = direction;
     packet->proc_info = *((proc_info_t *)proc);
-    MALLOC_AND_COPY(packet->ip_data, ip_data,
-                    ntohs(ip_data->ip_len), u_char)
+    size_t ip_len = ntohs(ip_data->ip_len);
+    packet->ip_data = divert_mem_alloc(config->pool, ip_len);
+    memcpy(packet->ip_data, ip_data, ip_len);
     divert_dump_packet((u_char *)packet->ip_data,
                        &packet->headers, errmsg);
 
