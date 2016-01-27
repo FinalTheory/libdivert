@@ -161,7 +161,7 @@ void *emulator_timer_thread_func(void *args) {
             ptr = pqueue_dequeue(config->timer_queue);
             circ_buf_insert(config->packet_queue,
                             &config->timeout_packet);
-            CHECK_AND_FREE(ptr)
+            divert_mem_free(config->pool, ptr);
         }
 
         // then wait until next timeout event
@@ -176,7 +176,7 @@ void *emulator_timer_thread_func(void *args) {
     finish:
     while (pqueue_size(config->timer_queue) > 0) {
         ptr = pqueue_dequeue(config->timer_queue);
-        CHECK_AND_FREE(ptr)
+        divert_mem_free(config->pool, ptr);
     }
     return NULL;
 }
@@ -259,7 +259,9 @@ void
 register_timer(pipe_node_t *node,
                struct timeval *tv) {
     emulator_config_t *config = node->config;
-    timeout_event_t *event = malloc(sizeof(timeout_event_t));
+    timeout_event_t *event =
+            divert_mem_alloc(config->pool,
+                             sizeof(timeout_event_t));
     event->tv = *tv;
     pqueue_enqueue(config->timer_queue, event);
 }
@@ -318,7 +320,9 @@ void emulator_callback(void *args, void *proc,
     /*
      * packets production stage
      */
-    emulator_packet_t *packet = calloc(1, sizeof(emulator_packet_t));
+    emulator_packet_t *packet =
+            divert_mem_alloc(config->pool,
+                             sizeof(emulator_packet_t));
     /*
      * If no pipe is associated with this packet direction
      * or the direction of this packet is unknown
@@ -360,6 +364,8 @@ emulator_config_t *emulator_create_config(divert_t *handle,
                                           size_t buf_size) {
     emulator_config_t *config =
             calloc(sizeof(emulator_config_t), 1);
+
+    config->pool = divert_create_pool(DEFAULT_PACKET_SIZE);
 
     config->emulator_thread = (pthread_t)-1;
     config->timer_thread = (pthread_t)-1;
@@ -414,6 +420,8 @@ void emulator_stop(emulator_config_t *config) {
 
 void emulator_destroy_config(emulator_config_t *config) {
     if (config != NULL) {
+        // free memory pool
+        divert_destroy_pool(config->pool);
         // free memory of all pipes
         for (int dir = 0; dir < 2; dir++) {
             for (pipe_node_t *node = config->pipe[dir];
@@ -440,12 +448,12 @@ void emulator_destroy_config(emulator_config_t *config) {
 void emulator_set_pid_list(emulator_config_t *config,
                            pid_t *pid_list, ssize_t num) {
     // copy first
-    pid_t *dup_list = malloc(sizeof(pid_t) * num);
+    pid_t *dup_list = divert_mem_alloc(config->pool, sizeof(pid_t) * num);
     memcpy(dup_list, pid_list, sizeof(pid_t) * num);
     // then swap
     swap((void **)&dup_list, (void **)&config->pid_list);
     config->num_pid = num;
-    CHECK_AND_FREE(dup_list)
+    divert_mem_free(config->pool, dup_list);
 }
 
 void emulator_add_flag(emulator_config_t *config,
@@ -466,6 +474,7 @@ void emulator_set_dump_pcap(emulator_config_t *config,
     size_t path_len = strlen(dump_path);
     config->dump_path = strdup(dump_path);
 
+    // this malloc should be freed
     char *filename = malloc(path_len + 32);
     strcpy(filename, dump_path);
     strcat(filename, "/capture_normal.pcap");

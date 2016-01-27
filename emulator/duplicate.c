@@ -1,10 +1,12 @@
 #include "duplicate.h"
+#include "emulator.h"
 #include <string.h>
 
 
 static void
 duplicate_pipe_insert(pipe_node_t *node,
                       emulator_packet_t *packet) {
+    emulator_config_t *config = node->config;
     duplicate_pipe_t *pipe = container_of(node, duplicate_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -22,10 +24,13 @@ duplicate_pipe_insert(pipe_node_t *node,
         // random repeat times, could be zero
         size_t times = rand() % pipe->max_duplicate;
         for (size_t i = 0; i < times; i++) {
-            emulator_packet_t *new_packet = calloc(1, sizeof(emulator_packet_t));
+            emulator_packet_t *new_packet =
+                    divert_mem_alloc(config->pool,
+                                     sizeof(emulator_packet_t));
             *new_packet = *packet;
-            MALLOC_AND_COPY(new_packet->ip_data, packet->ip_data,
-                            ntohs(packet->ip_data->ip_len), u_char)
+            size_t ip_len = ntohs(packet->ip_data->ip_len);
+            new_packet->ip_data = divert_mem_alloc(config->pool, ip_len);
+            memcpy(new_packet->ip_data, packet->ip_data, ip_len);
             // just insert the packet into next pipe is OK
             next_pipe_insert(node->next, new_packet);
         }

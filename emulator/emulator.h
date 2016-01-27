@@ -2,6 +2,7 @@
 #define DIVERT_EMULATOR_CONFIG_H
 
 #include "divert.h"
+#include "divert_mem_pool.h"
 #include "queue.h"
 #include "pqueue.h"
 #include <ctype.h>
@@ -131,6 +132,7 @@ typedef struct {
 
 struct emulator {
     uint64_t flags;                 // only in callback function and config set, safe
+    divert_mem_pool_t *pool;
 
     /*
      * initialized by emulator_set_dump_pcap()

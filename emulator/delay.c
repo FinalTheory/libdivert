@@ -25,6 +25,7 @@ cmp_delay_packet(const void *x, const void *y) {
 static void
 delay_pipe_insert(pipe_node_t *node,
                        emulator_packet_t *packet) {
+    emulator_config_t *config = node->config;
     delay_pipe_t *pipe = container_of(node, delay_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
     /*
@@ -48,7 +49,9 @@ delay_pipe_insert(pipe_node_t *node,
         struct timezone tz;
         gettimeofday(&tv, &tz);
         time_add(&tv, delay_time);
-        delay_packet_t *ptr = malloc(sizeof(delay_packet_t));
+        delay_packet_t *ptr =
+                divert_mem_alloc(config->pool,
+                                 sizeof(delay_packet_t));
         ptr->packet = packet;
         ptr->time_send = tv;
         ptr->is_registered = 0;
@@ -62,6 +65,7 @@ delay_pipe_insert(pipe_node_t *node,
 
 static void
 delay_pipe_process(pipe_node_t *node) {
+    emulator_config_t *config = node->config;
     delay_pipe_t *pipe = container_of(node, delay_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -85,12 +89,13 @@ delay_pipe_process(pipe_node_t *node) {
         // then send them to next pipe
         ptr = pqueue_dequeue(pipe->delay_queue);
         next_pipe_insert(node->next, ptr->packet);
-        CHECK_AND_FREE(ptr)
+        divert_mem_free(config->pool, ptr);
     }
 }
 
 static void
 delay_pipe_clear(pipe_node_t *node) {
+    emulator_config_t *config = node->config;
     delay_pipe_t *pipe = container_of(node, delay_pipe_t, node);
     delay_packet_t *ptr = NULL;
     pipe_insert_func_t next_pipe_insert = node->next->insert;
@@ -99,7 +104,7 @@ delay_pipe_clear(pipe_node_t *node) {
         ptr = pqueue_dequeue(pipe->delay_queue);
         // send all packets into next pipe
         next_pipe_insert(node->next, ptr->packet);
-        CHECK_AND_FREE(ptr)
+        divert_mem_free(config->pool, ptr);
     }
 }
 

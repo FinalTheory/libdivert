@@ -5,6 +5,7 @@
 static void
 drop_pipe_insert(pipe_node_t *node,
                       emulator_packet_t *packet) {
+    emulator_config_t *config = node->config;
     drop_pipe_t *pipe = container_of(node, drop_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -18,8 +19,8 @@ drop_pipe_insert(pipe_node_t *node,
                              &node->tv_start) < rand_double()) { break; }
         // just drop this packet, free the memory
         // as if we did not receive this packet
-        CHECK_AND_FREE(packet->ip_data)
-        CHECK_AND_FREE(packet)
+        divert_mem_free(config->pool, packet->ip_data);
+        divert_mem_free(config->pool, packet);
         return;
     } while (0);
     next_pipe_insert(node->next, packet);

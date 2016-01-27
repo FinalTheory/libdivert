@@ -44,6 +44,7 @@ calc_do_throttle(float *t1, float *t2,
 static void
 throttle_pipe_insert(pipe_node_t *node,
                      emulator_packet_t *packet) {
+    emulator_config_t *config = node->config;
     throttle_pipe_t *pipe = container_of(node, throttle_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -59,7 +60,9 @@ throttle_pipe_insert(pipe_node_t *node,
         // if buffer full, also quit
         if (circ_buf_is_full(pipe->throttle_queue)) { break; }
 
-        throttle_packet_t *ptr = malloc(sizeof(throttle_packet_t));
+        throttle_packet_t *ptr =
+                divert_mem_alloc(config->pool,
+                                 sizeof(throttle_packet_t));
         ptr->is_registered = 0;
         ptr->packet = packet;
         ptr->time_send = node->tv_start;
@@ -72,6 +75,7 @@ throttle_pipe_insert(pipe_node_t *node,
 
 static void
 throttle_pipe_process(pipe_node_t *node) {
+    emulator_config_t *config = node->config;
     throttle_pipe_t *pipe = container_of(node, throttle_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -94,12 +98,13 @@ throttle_pipe_process(pipe_node_t *node) {
         // then send them to next pipe
         ptr = circ_buf_remove(pipe->throttle_queue);
         next_pipe_insert(node->next, ptr->packet);
-        CHECK_AND_FREE(ptr)
+        divert_mem_free(config->pool, ptr);
     }
 }
 
 static void
 throttle_pipe_clear(pipe_node_t *node) {
+    emulator_config_t *config = node->config;
     throttle_pipe_t *pipe = container_of(node, throttle_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -107,7 +112,7 @@ throttle_pipe_clear(pipe_node_t *node) {
     while (circ_buf_size(pipe->throttle_queue) > 0) {
         throttle_packet_t *ptr = circ_buf_remove(pipe->throttle_queue);
         next_pipe_insert(node->next, ptr->packet);
-        CHECK_AND_FREE(ptr)
+        divert_mem_free(config->pool, ptr);
     }
 }
 

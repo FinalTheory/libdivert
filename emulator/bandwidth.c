@@ -6,6 +6,7 @@ bandwidth_pipe_insert(pipe_node_t *node,
                       emulator_packet_t *packet) {
     struct timezone tz;
     struct timeval time_now;
+    emulator_config_t *config = node->config;
     bandwidth_pipe_t *pipe = container_of(node, bandwidth_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -15,8 +16,8 @@ bandwidth_pipe_insert(pipe_node_t *node,
                                packet->headers.size_payload)) { break; }
         // if buffer is full, just drop this packet
         if (circ_buf_is_full(pipe->buffer)) {
-            CHECK_AND_FREE(packet->ip_data)
-            CHECK_AND_FREE(packet)
+            divert_mem_free(config->pool, packet->ip_data);
+            divert_mem_free(config->pool, packet);
             return;
         }
         // calculate current bandwidth (KB/s to Byte/s)
@@ -37,7 +38,7 @@ bandwidth_pipe_insert(pipe_node_t *node,
 
         // if not, insert it into buffer
         bandwidth_packet_t *ptr =
-                malloc(sizeof(bandwidth_packet_t));
+                divert_mem_alloc(config->pool, sizeof(bandwidth_packet_t));
         ptr->packet = packet;
         ptr->time_send = time_send;
         ptr->is_registered = 0;
@@ -61,6 +62,7 @@ bandwidth_pipe_insert(pipe_node_t *node,
 
 static void
 bandwidth_pipe_process(pipe_node_t *node) {
+    emulator_config_t *config = node->config;
     bandwidth_pipe_t *pipe = container_of(node, bandwidth_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -82,19 +84,20 @@ bandwidth_pipe_process(pipe_node_t *node) {
         ptr = circ_buf_remove(pipe->buffer);
         // do not update the previous send time here
         next_pipe_insert(node->next, ptr->packet);
-        CHECK_AND_FREE(ptr)
+        divert_mem_free(config->pool, ptr);
     }
 }
 
 static void
 bandwidth_pipe_clear(pipe_node_t *node) {
+    emulator_config_t *config = node->config;
     bandwidth_pipe_t *pipe = container_of(node, bandwidth_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
     while (circ_buf_size(pipe->buffer) > 0) {
         bandwidth_packet_t *ptr = circ_buf_remove(pipe->buffer);
         next_pipe_insert(node->next, ptr->packet);
-        CHECK_AND_FREE(ptr)
+        divert_mem_free(config->pool, ptr);
     }
 }
 

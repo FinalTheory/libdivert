@@ -21,8 +21,8 @@ reinject_pipe_insert(pipe_node_t *node,
                          config->dump_affected);
     }
     // and free this memory
-    CHECK_AND_FREE(packet->ip_data)
-    CHECK_AND_FREE(packet)
+    divert_mem_free(config->pool, packet->ip_data);
+    divert_mem_free(config->pool, packet);
 }
 
 pipe_node_t *reinject_pipe_create(divert_t *handle) {

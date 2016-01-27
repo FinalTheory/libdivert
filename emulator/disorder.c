@@ -18,6 +18,7 @@ cmp_disorder_packet(const void *x, const void *y) {
 static void
 disorder_pipe_insert(pipe_node_t *node,
                           emulator_packet_t *packet) {
+    emulator_config_t *config = node->config;
     disorder_pipe_t *pipe = container_of(node, disorder_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -40,7 +41,8 @@ disorder_pipe_insert(pipe_node_t *node,
         if (pqueue_is_full(disorder_queue)) { break; }
 
         disorder_packet_t *ptr =
-                malloc(sizeof(disorder_packet_t));
+                divert_mem_alloc(config->pool,
+                                 sizeof(disorder_packet_t));
         ptr->packet = packet;
         ptr->time_send = (rand() % pipe->max_disorder + 1) +
                          pipe->packet_cnt[packet->direction];
@@ -54,6 +56,7 @@ disorder_pipe_insert(pipe_node_t *node,
 
 static void
 disorder_pipe_process(pipe_node_t *node) {
+    emulator_config_t *config = node->config;
     disorder_pipe_t *pipe = container_of(node, disorder_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -69,13 +72,14 @@ disorder_pipe_process(pipe_node_t *node) {
             }
             ptr = pqueue_dequeue(disorder_queue);
             next_pipe_insert(node->next, ptr->packet);
-            CHECK_AND_FREE(ptr)
+            divert_mem_free(config->pool, ptr);
         }
     }
 }
 
 static void
 disorder_pipe_clear(pipe_node_t *node) {
+    emulator_config_t *config = node->config;
     disorder_pipe_t *pipe = container_of(node, disorder_pipe_t, node);
     pipe_insert_func_t next_pipe_insert = node->next->insert;
 
@@ -85,7 +89,7 @@ disorder_pipe_clear(pipe_node_t *node) {
         while (pqueue_size(disorder_queue) > 0) {
             disorder_packet_t *ptr = pqueue_dequeue(disorder_queue);
             next_pipe_insert(node->next, ptr->packet);
-            CHECK_AND_FREE(ptr)
+            divert_mem_free(config->pool, ptr);
         }
     }
 }
