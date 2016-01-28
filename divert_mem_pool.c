@@ -5,11 +5,9 @@
 
 divert_mem_pool_t *divert_create_pool(size_t max_alloc) {
     divert_mem_pool_t *pool =
-            calloc(sizeof(divert_mem_pool_t), 1);
-    if (pool == NULL) {
-        return NULL;
-    }
-    pool->pool = calloc(sizeof(divert_mem_block_t *), max_alloc + 1);
+            calloc(1, sizeof(divert_mem_pool_t));
+    if (pool == NULL) { return NULL; }
+    pool->pool = calloc(max_alloc + 1, sizeof(divert_mem_block_t *));
     if (pool->pool == NULL) {
         free(pool);
         return NULL;
@@ -24,11 +22,13 @@ divert_mem_pool_t *divert_create_pool(size_t max_alloc) {
 
 void divert_destroy_pool(divert_mem_pool_t *pool) {
     if (pool != NULL) {
+        divert_mem_block_t *next = NULL, *blk = NULL;
         // first free all memory blocks
         for (int idx = 0; idx <= pool->max; idx++) {
-            for (divert_mem_block_t *blk = pool->pool[idx];
-                 blk; blk = blk->next) {
+            for (blk = pool->pool[idx]; blk;) {
+                next = blk->next;
                 free(blk);
+                blk = next;
             }
         }
         // then free the entire pool
@@ -48,7 +48,7 @@ void *divert_mem_alloc(divert_mem_pool_t *pool, size_t size) {
             block = pool->pool[size];
             if (block == NULL) { break; }
             next_blk = block->next;
-        } while (!__sync_bool_compare_and_swap(&pool->pool[size], block, next_blk));
+        } while (!CAS(&pool->pool[size], block, next_blk));
     }
     // if got a block of memory, just return it
     if (block != NULL) {
@@ -61,7 +61,7 @@ void *divert_mem_alloc(divert_mem_pool_t *pool, size_t size) {
         return addr;
     }
     // if not, we allocate a new block of memory
-    void *p = calloc(sizeof(divert_mem_block_t) + size, 1);
+    void *p = calloc(1, sizeof(divert_mem_block_t) + size);
     if (p != NULL) {
         block = p;
         block->next = NULL;

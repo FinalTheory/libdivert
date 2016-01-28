@@ -421,8 +421,6 @@ void emulator_stop(emulator_config_t *config) {
 
 void emulator_destroy_config(emulator_config_t *config) {
     if (config != NULL) {
-        // free memory pool
-        divert_destroy_pool(config->pool);
         // free memory of all pipes
         for (int dir = 0; dir < 2; dir++) {
             for (pipe_node_t *node = config->pipe[dir];
@@ -442,6 +440,8 @@ void emulator_destroy_config(emulator_config_t *config) {
 
         // destroy buffer
         circ_buf_destroy(config->packet_queue);
+        // free memory pool
+        divert_destroy_pool(config->pool);
         free(config);
     }
 }

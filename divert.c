@@ -893,6 +893,7 @@ int divert_close(divert_t *divert_handle) {
     close(divert_handle->exit_fd[0]);
     close(divert_handle->exit_fd[1]);
 
+    divert_destroy_pool(divert_handle->pool);
     free(divert_handle);
     return 0;
 }
