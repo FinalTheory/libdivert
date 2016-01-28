@@ -103,6 +103,7 @@ bandwidth_pipe_clear(pipe_node_t *node) {
 
 static void
 bandwidth_pipe_free(pipe_node_t *node) {
+    emulator_free_size_filter(node->size_filter);
     bandwidth_pipe_t *pipe = container_of(node, bandwidth_pipe_t, node);
     CHECK_AND_FREE(pipe->t)
     CHECK_AND_FREE(pipe->bandwidth)

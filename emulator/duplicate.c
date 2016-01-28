@@ -40,6 +40,7 @@ duplicate_pipe_insert(pipe_node_t *node,
 
 static void
 duplicate_pipe_free(pipe_node_t *node) {
+    emulator_free_size_filter(node->size_filter);
     duplicate_pipe_t *pipe = container_of(node, duplicate_pipe_t, node);
     CHECK_AND_FREE(pipe->t)
     CHECK_AND_FREE(pipe->dup_rate)

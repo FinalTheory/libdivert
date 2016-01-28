@@ -46,6 +46,7 @@ biterr_pipe_insert(pipe_node_t *node,
 
 static void
 biterr_pipe_free(pipe_node_t *node) {
+    emulator_free_size_filter(node->size_filter);
     biterr_pipe_t *pipe = container_of(node, biterr_pipe_t, node);
     CHECK_AND_FREE(pipe->t)
     CHECK_AND_FREE(pipe->biterr_rate)

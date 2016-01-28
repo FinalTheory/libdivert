@@ -865,7 +865,7 @@ void divert_loop_stop(divert_t *handle) {
     handle->is_looping = 0;
 
     // write message to PIPE to break loop
-    if (DIVERT_FLAG_FAST_EXIT) {
+    if (handle->flags & DIVERT_FLAG_FAST_EXIT) {
         // write data into pipe to exit event loop
         write(handle->pipe_fd[1], "q", 1);
     }

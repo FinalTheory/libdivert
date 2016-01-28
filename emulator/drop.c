@@ -28,6 +28,7 @@ drop_pipe_insert(pipe_node_t *node,
 
 static void
 drop_pipe_free(pipe_node_t *node) {
+    emulator_free_size_filter(node->size_filter);
     drop_pipe_t *pipe = container_of(node, drop_pipe_t, node);
     CHECK_AND_FREE(pipe->t)
     CHECK_AND_FREE(pipe->drop_rate)

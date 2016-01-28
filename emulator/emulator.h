@@ -246,4 +246,9 @@ int emulator_config_check(emulator_config_t *config, char *errmsg);
 
 int emulator_is_running(emulator_config_t *config);
 
+packet_size_filter *
+emulator_create_size_filter(size_t num, size_t *size, float *rate);
+
+void emulator_free_size_filter(packet_size_filter *filter);
+
 #endif //DIVERT_EMULATOR_CONFIG_H

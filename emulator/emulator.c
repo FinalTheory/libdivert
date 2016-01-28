@@ -497,12 +497,22 @@ void emulator_set_dump_pcap(emulator_config_t *config,
 }
 
 packet_size_filter *
-emulator_create_size_filter(size_t num, size_t *size, float *rate) {
-    packet_size_filter *filter = calloc(1, sizeof(packet_size_filter));
+emulator_create_size_filter(size_t num,
+                            size_t *size,
+                            float *rate) {
+    packet_size_filter *filter =
+            calloc(1, sizeof(packet_size_filter));
     filter->num = num;
-    filter->size = size;
-    filter->rate = rate;
+    MALLOC_AND_COPY(filter->size, size, num, size_t)
+    MALLOC_AND_COPY(filter->rate, rate, num, float)
     return filter;
+}
+
+void emulator_free_size_filter(packet_size_filter *filter) {
+    if (filter == NULL) { return; }
+    CHECK_AND_FREE(filter->rate)
+    CHECK_AND_FREE(filter->size)
+    CHECK_AND_FREE(filter)
 }
 
 int emulator_is_running(emulator_config_t *config) {

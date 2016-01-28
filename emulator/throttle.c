@@ -118,6 +118,7 @@ throttle_pipe_clear(pipe_node_t *node) {
 
 static void
 throttle_pipe_free(pipe_node_t *node) {
+    emulator_free_size_filter(node->size_filter);
     throttle_pipe_t *pipe = container_of(node, throttle_pipe_t, node);
     circ_buf_destroy(pipe->throttle_queue);
     CHECK_AND_FREE(pipe->t_start)
