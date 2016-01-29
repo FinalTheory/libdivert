@@ -42,6 +42,7 @@ divert_t *divert_create(int port_number, u_int32_t flags) {
         return NULL;
     }
     divert_handle->flags = flags;
+    divert_handle->thread_ctl = (pthread_t)-1;
     divert_handle->divert_port = port_number;
     divert_handle->thread_buffer_size = PACKET_BUFFER_SIZE;
     divert_handle->ipfw_id = ipfw_rule_index++;
@@ -474,35 +475,29 @@ static void divert_loop_finish(divert_t *handle) {
     write(handle->exit_fd[1], "e", 1);
 }
 
-void divert_wait_loop_finish(divert_t *handle) {
-    if (handle->flags & DIVERT_IS_LOOPED) {
+void divert_loop_join(divert_t *handle) {
+    if (handle->thread_ctl != (pthread_t)-1) {
+        void *res;
         char str_buf[PIPE_BUFFER_SIZE];
+        pthread_join(handle->thread_ctl, &res);
+        handle->thread_ctl = (pthread_t)-1;
         read(handle->exit_fd[0], str_buf, sizeof(str_buf));
         assert(str_buf[0] == 'e');
-        handle->flags &= ~((u_int32_t)DIVERT_IS_LOOPED);
     }
 }
 
 static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
-    // return value of thread
-    void *ret_val;
     // number of diverted bytes
     ssize_t num_divert;
     // struct to hold packet headers
     packet_hdrs_t packet_hdrs;
     // error message buffer
     char errmsg[DIVERT_ERRBUF_SIZE];
-    pthread_t *divert_thread_callback_handle = calloc(1, sizeof(pthread_t));
     socklen_t sin_len = sizeof(struct sockaddr);
 
     divert_handle->is_looping = 1;
     divert_handle->num_diverted = 0;
     divert_handle->num_unknown = 0;
-    // only start new thread in non-blocking mode
-    if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
-        pthread_create(divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
-    }
-
     while (divert_handle->is_looping) {
         struct sockaddr sin;
 
@@ -560,35 +555,22 @@ static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
     circ_buf_insert(divert_handle->thread_buffer,
                     divert_new_error_packet(divert_handle, DIVERT_STOP_LOOP));
 
-    if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
-        // wait until the child thread is stopped
-        pthread_join(*divert_thread_callback_handle, &ret_val);
-    }
-
     // call divert_loop_finish() to clear ipfw rule
     divert_loop_finish(divert_handle);
 }
 
 static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
-    // return value of thread
-    void *ret_val;
     // number of diverted bytes
     ssize_t num_divert;
     // struct to hold packet headers
     packet_hdrs_t packet_hdrs;
     // error message buffer
     char errmsg[DIVERT_ERRBUF_SIZE];
-    pthread_t *divert_thread_callback_handle = calloc(1, sizeof(pthread_t));
     socklen_t sin_len = sizeof(struct sockaddr);
 
     divert_handle->is_looping = 1;
     divert_handle->num_diverted = 0;
     divert_handle->num_unknown = 0;
-    // only start new thread in non-blocking mode
-    if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
-        pthread_create(divert_thread_callback_handle, NULL, divert_thread_callback, divert_handle);
-    }
-
     /* register two file descriptor into kqueue */
     int kq = kqueue();
     struct kevent changes[2];
@@ -679,11 +661,6 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
     circ_buf_insert(divert_handle->thread_buffer,
                     divert_new_error_packet(divert_handle, DIVERT_STOP_LOOP));
 
-    if (!(divert_handle->flags & DIVERT_FLAG_BLOCK_IO)) {
-        // wait until the child thread is stopped
-        pthread_join(*divert_thread_callback_handle, &ret_val);
-    }
-
     // call divert_loop_finish() to clear ipfw rule
     divert_loop_finish(divert_handle);
 }
@@ -707,10 +684,7 @@ int divert_loop(divert_t *divert_handle, int count) {
     divert_handle->errmsg[0] = 0;
 
     // wait until previous looping is exited
-    divert_wait_loop_finish(divert_handle);
-
-    // set a flag
-    divert_handle->flags |= DIVERT_IS_LOOPED;
+    divert_loop_join(divert_handle);
 
     // setup firewall to redirect all traffic to divert socket
     if (ipfw_setup(divert_handle->ipfw_filter,
@@ -735,13 +709,13 @@ int divert_loop(divert_t *divert_handle, int count) {
         args->count = count;
         args->divert_handle = divert_handle;
         args->loop_function = loop_function;
-        pthread_t non_block_thread;
-        pthread_create(&non_block_thread, NULL,
+        pthread_create(&divert_handle->thread_ctl, NULL,
                        divert_non_block_thread, args);
-        pthread_detach(non_block_thread);
         // wait until the main loop is started
         while (!divert_handle->is_looping);
     } else {
+        pthread_create(&divert_handle->thread_ctl, NULL,
+                       divert_thread_callback, divert_handle);
         loop_function(divert_handle, count);
     }
     return 0;
@@ -875,7 +849,7 @@ int divert_close(divert_t *divert_handle) {
     divert_handle->errmsg[0] = 0;
 
     // first wait until divert loop is exited
-    divert_wait_loop_finish(divert_handle);
+    divert_loop_join(divert_handle);
 
     // close the divert socket and release the buffer
     close(divert_handle->divert_fd);

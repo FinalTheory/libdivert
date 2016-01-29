@@ -43,7 +43,6 @@ extern "C" {
  * you can choose to use extended information
  * or just divert the raw IP packets
  */
-#define DIVERT_IS_LOOPED         (1u)
 #define DIVERT_FLAG_FAST_EXIT    (1u << 1)
 #define DIVERT_FLAG_BLOCK_IO     (1u << 2)
 #define DIVERT_FLAG_TCP_REASSEM  (1u << 3)
@@ -109,6 +108,7 @@ typedef struct {
     volatile u_char is_looping;
 
     char *ipfw_filter;
+    pthread_t thread_ctl;
 
     // store error code and message
     char errmsg[DIVERT_ERRBUF_SIZE];
@@ -192,7 +192,7 @@ int divert_is_looping(divert_t *handle);
 
 void divert_loop_stop(divert_t *handle);
 
-void divert_wait_loop_finish(divert_t *handle);
+void divert_loop_join(divert_t *handle);
 
 /*
  * this function *SHOULD* be called within the thread you call divert_loop()
