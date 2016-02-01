@@ -16,3 +16,6 @@ target_link_libraries(dump_divert divert)
 
 add_executable(gfw_simulator gfw_simulator.c)
 target_link_libraries(gfw_simulator divert)
+
+add_executable(violated_wifi violated_wifi.c)
+target_link_libraries(violated_wifi divert)

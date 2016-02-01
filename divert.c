@@ -60,6 +60,57 @@ int divert_set_thread_buffer_size(divert_t *handle, size_t bufsize) {
     return 0;
 }
 
+int divert_set_device(divert_t *handle, char *dev_name) {
+    // if already set, just return error
+    if (handle->libnet != NULL) {
+        sprintf(handle->errmsg, "Device already set.");
+        return -1;
+    }
+    // find the associated ip address of this device
+    struct ifaddrs *ifap = NULL, *ifa = NULL;
+    struct sockaddr_in *sa = NULL, *sa_mask = NULL;
+    int found = 0;
+    if (getifaddrs (&ifap)) {
+        sprintf(handle->errmsg, "getifaddrs() failed: %s", strerror(errno));
+        return -1;
+    };
+    for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr && ifa->ifa_addr->sa_family == AF_INET) {
+            sa = (struct sockaddr_in *)ifa->ifa_addr;
+            sa_mask = (struct sockaddr_in *)ifa->ifa_netmask;
+            if (strcasecmp(dev_name, ifa->ifa_name) == 0) {
+                handle->iface_addr = sa->sin_addr.s_addr;
+                handle->iface_mask = sa_mask->sin_addr.s_addr;
+                found = 1;
+                break;
+            }
+        }
+    }
+    handle->iface_addr &= handle->iface_mask;
+    freeifaddrs(ifap);
+    if (!found) {
+        sprintf(handle->errmsg, "Could not find ip address of device %s", dev_name);
+        return -1;
+    }
+    handle->libnet = libnet_init(LIBNET_RAW4_ADV, dev_name, handle->errmsg);
+    if (handle->libnet == NULL) { return -1; }
+    return 0;
+}
+
+int divert_device_inbound(divert_t *handle, struct ip *packet) {
+    if (handle->libnet == NULL) { return 0; }
+    if ((packet->ip_dst.s_addr & handle->iface_mask) == handle->iface_addr &&
+        (packet->ip_src.s_addr & handle->iface_mask) != handle->iface_addr) { return 1; }
+    return 0;
+}
+
+int divert_device_outbound(divert_t *handle, struct ip *packet) {
+    if (handle->libnet == NULL) { return 0; }
+    if ((packet->ip_dst.s_addr & handle->iface_mask) != handle->iface_addr &&
+        (packet->ip_src.s_addr & handle->iface_mask) == handle->iface_addr) { return 1; }
+    return 0;
+}
+
 int divert_set_error_handler(divert_t *handle, divert_error_handler_t handler) {
     handle->err_handler = handler;
     return 0;
@@ -813,7 +864,17 @@ ssize_t divert_reinject(divert_t *handle, struct ip *packet,
     // calculate packet length
     socklen_t sin_len = sizeof(struct sockaddr);
     if (length < 0) {
-        length = ntohs(((struct ip *)packet)->ip_len);
+        length = ntohs(packet->ip_len);
+    }
+    // check the destination of this packet and judge if
+    // we should force inject it into another device
+    if (divert_device_inbound(handle, packet)) {
+        int ret;
+        do {
+            ret = libnet_adv_write_raw_ipv4(handle->libnet,
+                                            (u_int8_t *)packet, (uint32_t)length);
+        } while (ret == -1 && errno == EINTR);
+        return ret;
     }
     // re-checksum the packet
     if (packet->ip_sum == 0) {
@@ -866,6 +927,10 @@ int divert_close(divert_t *divert_handle) {
     close(divert_handle->pipe_fd[1]);
     close(divert_handle->exit_fd[0]);
     close(divert_handle->exit_fd[1]);
+
+    if (divert_handle->libnet != NULL) {
+        libnet_destroy(divert_handle->libnet);
+    }
 
     divert_destroy_pool(divert_handle->pool);
     free(divert_handle);

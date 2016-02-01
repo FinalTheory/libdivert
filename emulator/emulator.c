@@ -279,6 +279,24 @@ void emulator_callback(void *args, void *proc,
     reinject_pipe_t *pipe = container_of(config->exit_pipe,
                                          reinject_pipe_t, node);
 
+    // check direction of this packet
+    // note that we should first check
+    // if this packet comes from a special device
+    u_char direction, match_device = 0;
+    if (divert_device_inbound(pipe->handle, ip_data)) {
+        match_device = 1;
+        direction = DIRECTION_IN;
+    } else if (divert_device_outbound(pipe->handle, sin)) {
+        match_device = 1;
+        direction = DIRECTION_OUT;
+    } else if (divert_is_inbound(sin, NULL)) {
+        direction = DIRECTION_IN;
+    } else if (divert_is_outbound(sin)) {
+        direction = DIRECTION_OUT;
+    } else {
+        direction = DIRECTION_UNKNOWN;
+    }
+
     /*
      * if this packet is from unknown PID
      * then we must record it first
@@ -289,11 +307,12 @@ void emulator_callback(void *args, void *proc,
 
     /*
      * if this packet is not from target process
+     * or not from a specified network interface
      * just re-inject and ignore this packet
      * notice that re-inject function is thread safe
      */
     if (!check_pid_in_list(pid, config->pid_list,
-                           config->num_pid)) {
+                           config->num_pid) && !match_device) {
         // do not re-inject through exit pipe
         // since we're not interested in this packet
         divert_reinject(pipe->handle, ip_data, -1, sin);
@@ -305,16 +324,6 @@ void emulator_callback(void *args, void *proc,
      */
     if (config->flags & EMULATOR_DUMP_PCAP) {
         divert_dump_pcap(ip_data, config->dump_normal);
-    }
-
-    // check direction of this packet
-    u_char direction;
-    if (divert_is_inbound(sin, NULL)) {
-        direction = DIRECTION_IN;
-    } else if (divert_is_outbound(sin)) {
-        direction = DIRECTION_OUT;
-    } else {
-        direction = DIRECTION_UNKNOWN;
     }
 
     /*

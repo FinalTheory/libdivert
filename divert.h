@@ -9,6 +9,8 @@ extern "C" {
 #include "divert_mem_pool.h"
 #include <stdio.h>
 #include <netinet/ip.h>
+#include <libnet.h>
+#include <ifaddrs.h>
 #include "netinet/ip_fw.h"
 
 /*
@@ -109,6 +111,9 @@ typedef struct {
 
     char *ipfw_filter;
     pthread_t thread_ctl;
+    libnet_t *libnet;
+    in_addr_t iface_addr;
+    in_addr_t iface_mask;
 
     // store error code and message
     char errmsg[DIVERT_ERRBUF_SIZE];
@@ -145,6 +150,12 @@ divert_t *divert_create(int port_number, u_int32_t flags);
 int divert_set_data_buffer_size(divert_t *handle, size_t bufsize);
 
 int divert_set_thread_buffer_size(divert_t *handle, size_t bufsize);
+
+int divert_set_device(divert_t *handle, char *dev_name);
+
+int divert_device_inbound(divert_t *handle, struct ip *packet);
+
+int divert_device_outbound(divert_t *handle, struct ip *packet);
 
 int divert_set_callback(divert_t *handle, divert_callback_t callback, void *args);
 
