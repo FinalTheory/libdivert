@@ -476,7 +476,7 @@ static void *divert_thread_callback(void *arg) {
     circ_buf_t *buf = handle->thread_buffer;
     divert_callback_t callback = handle->callback;
     void *callback_args = handle->callback_args;
-    while (handle->is_looping) {
+    while (1) {
         packet = circ_buf_remove(buf);
         // if this is a normal data packet
         if (packet->flag & DIVERT_RAW_IP_PACKET) {
@@ -515,6 +515,10 @@ static void divert_loop_finish(divert_t *handle) {
     while (!circ_buf_is_empty(handle->thread_buffer)) {
         packet_info_t *packet = circ_buf_remove(handle->thread_buffer);
         if (packet == NULL) { continue; }
+        if (packet->flag & DIVERT_STOP_LOOP) {
+            circ_buf_insert(handle->thread_buffer, packet);
+            break;
+        }
         if (packet->flag & DIVERT_RAW_IP_PACKET) {
             divert_reinject(handle, packet->ip_data, -1, &packet->sin);
             divert_mem_free(handle->pool, packet->ip_data);
