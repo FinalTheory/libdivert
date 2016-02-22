@@ -8,8 +8,6 @@
 #include "bandwidth.h"
 #include "duplicate.h"
 
-#include <string.h>
-
 
 void swap(void **a, void **b) {
     void *tmp = *b;
@@ -286,7 +284,7 @@ void emulator_callback(void *args, void *proc,
     if (divert_device_inbound(pipe->handle, ip_data)) {
         match_device = 1;
         direction = DIRECTION_IN;
-    } else if (divert_device_outbound(pipe->handle, sin)) {
+    } else if (divert_device_outbound(pipe->handle, ip_data)) {
         match_device = 1;
         direction = DIRECTION_OUT;
     } else if (divert_is_inbound(sin, NULL)) {
@@ -581,9 +579,12 @@ int emulator_config_check(emulator_config_t *config, char *errmsg) {
                 }
                 case PIPE_DELAY: {
                     delay_pipe_t *pipe = container_of(cur, delay_pipe_t, node);
-                    t = pipe->t;
-                    val = pipe->delay_time;
+                    if (pipe->delay_time == NULL) {
+                        sprintf(errmsg, "Delay data not set.");
+                        return -1;
+                    }
                 }
+                    break;
                 case PIPE_DISORDER: {
                     disorder_pipe_t *pipe = container_of(cur, disorder_pipe_t, node);
                     t = pipe->t;

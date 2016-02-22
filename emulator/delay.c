@@ -1,5 +1,4 @@
 #include "delay.h"
-#include <string.h>
 
 static int
 cmp_delay_packet(const void *x, const void *y) {
@@ -37,11 +36,23 @@ delay_pipe_insert(pipe_node_t *node,
         if (!is_effect_applied(node->size_filter,
                                packet->headers.size_payload)) { break; }
         if (pqueue_is_full(pipe->delay_queue)) { break; }
+
+        double delay_time;
+        if (pipe->t != NULL) {
+            // time driven mode:
+            // delay time is calculated by a function
+            delay_time = calc_val_by_time(pipe->t,
+                                          pipe->delay_time,
+                                          node->num, &node->p,
+                                          &node->tv_start);
+        } else {
+            // event driven mode:
+            // delay time is specified for each packet
+            delay_time = pipe->delay_time[node->p];
+            node->p = (node->p + 1) % node->num;
+        }
+
         // break if the delay time is too short
-        double delay_time = calc_val_by_time(pipe->t,
-                                             pipe->delay_time,
-                                             node->num, &node->p,
-                                             &node->tv_start);
         if (delay_time < FLOAT_EPS) { break; }
 
         // calculate send time
@@ -125,7 +136,12 @@ pipe_node_t *delay_pipe_create(packet_size_filter *filter,
     delay_pipe_t *pipe = calloc(1, sizeof(delay_pipe_t));
     pipe_node_t *node = &pipe->node;
 
-    MALLOC_AND_COPY(pipe->t, t, num, float)
+    if (t != NULL) {
+        MALLOC_AND_COPY(pipe->t, t, num, float)
+    } else {
+        pipe->t = NULL;
+    }
+
     MALLOC_AND_COPY(pipe->delay_time, delay_time, num, float)
     pipe->delay_queue = pqueue_new(cmp_delay_packet, queue_size, 0);
 
