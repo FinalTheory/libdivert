@@ -1,3 +1,4 @@
+#include <divert.h>
 #include "emulator.h"
 #include "dump_packet.h"
 #include "throttle.h"
@@ -142,141 +143,75 @@ init_callback_runtime_states(emulator_config_t *config) {
     }
 }
 
-void *emulator_timer_thread_func(void *args) {
-    emulator_config_t *config = args;
-    struct timeval time_now;
-    struct timezone tz;
-    timeout_event_t *ptr;
-
-    while (1) {
-        // try to send all timeout events
-        while (1) {
-            ptr = pqueue_head(config->timer_queue);
-            // NULL pointer means quit the thread
-            if (ptr == NULL) { goto finish; }
-            gettimeofday(&time_now, &tz);
-            if (time_greater_than(&ptr->tv, &time_now)) { break; }
-            ptr = pqueue_dequeue(config->timer_queue);
-            circ_buf_insert(config->packet_queue,
-                            &config->timeout_packet);
-            divert_mem_free(config->pool, ptr);
-        }
-
-        // then wait until next timeout event
-        // or a new timer is set
-        if (pqueue_size(config->timer_queue) > 0) {
-            ptr = pqueue_head(config->timer_queue);
-            if (time_greater_than(&ptr->tv, &time_now)) {
-                pqueue_wait_until(config->timer_queue, &ptr->tv);
-            }
-        }
-    }
-    finish:
-    while (pqueue_size(config->timer_queue) > 0) {
-        ptr = pqueue_dequeue(config->timer_queue);
-        divert_mem_free(config->pool, ptr);
-    }
-    return NULL;
-}
-
-void *emulator_thread_func(void *args) {
-    /*
-     * initialize local variables
-     * these are of course thread-safe
-     */
-    void *thread_res;
-    emulator_config_t *config = args;
+void emulator_process(emulator_config_t *config,
+                      emulator_packet_t *packet) {
     pipe_node_t *node = NULL;
 
-    // create timer thread
-    pthread_create(&config->timer_thread, NULL,
-                   emulator_timer_thread_func, config);
-    /*
-     * config && thread init stage
-     */
-    init_callback_runtime_states(config);
-
-    while (1) {
-        // get a packet from buffer
-        emulator_packet_t *packet =
-                circ_buf_remove(config->packet_queue);
-
-        // check the label of this packet
-        // and take corresponding actions
-        if (packet->label == EVENT_QUIT) {
-            // quit event, just break
-            break;
-        } else if (packet->label == NEW_PACKET) {
-            int dir = packet->direction;
-            // insert packet into first pipe
+    // check the label of this packet
+    // and take corresponding actions
+    int dir = packet->direction;
+    if (packet->label == NEW_PACKET) {
+        // insert packet into first pipe
+        config->pipe[dir]->insert(config->pipe[dir], packet);
+        // process each pipe if it has process function
+        for (node = config->pipe[dir]; node;
+             node = node->next) {
+            if (NULL != node->process) {
+                node->process(node);
+            }
+        }
+    } else if (packet->label == TIMEOUT_EVENT) {
+        if (config->pipe[dir] != NULL) {
             config->pipe[dir]->insert(config->pipe[dir], packet);
-            // process each pipe if it has process function
             for (node = config->pipe[dir]; node;
                  node = node->next) {
                 if (NULL != node->process) {
                     node->process(node);
                 }
             }
-        } else if (packet->label == TIMEOUT_EVENT) {
-            for (int dir = 0; dir < 2; dir++) {
-                if (config->pipe[dir] != NULL) {
-                    config->pipe[dir]->insert(config->pipe[dir], packet);
-                    for (node = config->pipe[dir]; node;
-                         node = node->next) {
-                        if (NULL != node->process) {
-                            node->process(node);
-                        }
-                    }
-                }
-            }
         }
     }
+}
 
+void emulator_flush(emulator_config_t *config) {
     // flush all buffered packets
     for (int dir = 0; dir < 2; dir++) {
-        for (node = config->pipe[dir]; node;
-             node = node->next) {
+        for (pipe_node_t *node = config->pipe[dir];
+             node; node = node->next) {
             if (NULL != node->clear) {
                 node->clear(node);
             }
         }
     }
-
-    // send a NULL to quit timer thread
-    pqueue_enqueue(config->timer_queue, NULL);
-    // join the thread
-    if (config->timer_thread != (pthread_t)-1) {
-        pthread_join(config->timer_thread, &thread_res);
-        config->timer_thread = (pthread_t)-1;
-    }
+    // remove the running flag
     config->flags &= ~((uint64_t)EMULATOR_IS_RUNNING);
-    return NULL;
-}
-
-void
-register_timer(pipe_node_t *node,
-               struct timeval *tv) {
-    emulator_config_t *config = node->config;
-    timeout_event_t *event =
-            divert_mem_alloc(config->pool,
-                             sizeof(timeout_event_t));
-    event->tv = *tv;
-    pqueue_enqueue(config->timer_queue, event);
 }
 
 void emulator_callback(void *args, void *proc,
                        struct ip *ip_data,
                        struct sockaddr *sin) {
     char errmsg[DIVERT_ERRBUF_SIZE];
-    // Note: this function won't be reentry
     emulator_config_t *config = args;
+
+    // check if we should fill time stamps
+    init_callback_runtime_states(config);
+
+    // first process if this is a timeout event
+    if (ip_data == NULL && sin == NULL) {
+        emulator_packet_t timeout_packet;
+        memset(&timeout_packet, 0, sizeof(emulator_packet_t));
+        timeout_packet.direction = (u_char)*(int *)proc;
+        timeout_packet.label = TIMEOUT_EVENT;
+        emulator_process(config, &timeout_packet);
+        return;
+    }
+
     proc_info_t *proc_info = proc;
     pid_t pid = proc_info->pid != -1 ?
                 proc_info->pid : proc_info->epid;
 
     reinject_pipe_t *pipe = container_of(config->exit_pipe,
                                          reinject_pipe_t, node);
-
     // check direction of this packet
     // note that we should first check
     // if this packet comes from a special device
@@ -336,6 +271,7 @@ void emulator_callback(void *args, void *proc,
      * then we mark it as a special packet type
      */
     packet->sin = *sin;
+    packet->label = NEW_PACKET;
     packet->direction = direction;
     packet->proc_info = *((proc_info_t *)proc);
     size_t ip_len = ntohs(ip_data->ip_len);
@@ -344,39 +280,25 @@ void emulator_callback(void *args, void *proc,
     divert_dump_packet((u_char *)packet->ip_data,
                        &packet->headers, errmsg);
 
-    circ_buf_insert(config->packet_queue, packet);
+    emulator_process(config, packet);
 }
 
-static int
-cmp_time_event(const void *x, const void *y) {
-    if (x == NULL) { return 1; }
-    if (y == NULL) { return -1; }
-    const timeout_event_t *a = x;
-    const timeout_event_t *b = y;
-    uint64_t val_a = a->tv.tv_sec *
-                     (uint64_t)1000000 +
-                     a->tv.tv_usec;
-    uint64_t val_b = b->tv.tv_sec *
-                     (uint64_t)1000000 +
-                     b->tv.tv_usec;
-    if (val_a > val_b) {
-        return -1;
-    } else if (val_a < val_b) {
-        return 1;
-    } else {
-        return 0;
-    }
+void register_timer(pipe_node_t *node,
+                    struct timeval *tv,
+                    int direction) {
+    emulator_config_t *config = node->config;
+    divert_t *handle = container_of(config->exit_pipe,
+                                    reinject_pipe_t, node)->handle;
+    int *dir = divert_mem_alloc(handle->pool, sizeof(int));
+    *dir = direction;
+    divert_register_timer(handle, tv, dir, 0);
 }
 
-emulator_config_t *emulator_create_config(divert_t *handle,
-                                          size_t buf_size) {
+emulator_config_t *emulator_create_config(divert_t *handle) {
     emulator_config_t *config =
             calloc(sizeof(emulator_config_t), 1);
 
     config->pool = divert_create_pool(DEFAULT_PACKET_SIZE);
-
-    config->emulator_thread = (pthread_t)-1;
-    config->timer_thread = (pthread_t)-1;
 
     config->exit_pipe = reinject_pipe_create(handle);
     config->exit_pipe->config = config;
@@ -384,11 +306,6 @@ emulator_config_t *emulator_create_config(divert_t *handle,
     config->pipe[DIRECTION_IN] = config->exit_pipe;
     config->pipe[DIRECTION_OUT] = config->exit_pipe;
     config->pipe[DIRECTION_UNKNOWN] = config->exit_pipe;
-
-    config->packet_queue = circ_buf_create(buf_size, 1);
-    config->timer_queue = pqueue_new(cmp_time_event, TIMER_QUEUE_SIZE, 1);
-
-    config->timeout_packet.label = TIMEOUT_EVENT;
 
     return config;
 }
@@ -398,32 +315,6 @@ uint64_t emulator_data_size(emulator_config_t *config, int direction) {
         return config->dsize[direction];
     }
     return 0;
-}
-
-void emulator_start(emulator_config_t *config) {
-    // create emulator thread
-    // associated with emulator_config_t
-    pthread_create(&config->emulator_thread, NULL,
-                   emulator_thread_func, config);
-}
-
-void emulator_stop(emulator_config_t *config) {
-    void *thread_res;
-    if (config != NULL) {
-        // insert a signal to stop the emulator thread
-        emulator_packet_t packet;
-        memset(&packet, 0, sizeof(emulator_packet_t));
-        packet.label = EVENT_QUIT;
-        circ_buf_insert(config->packet_queue, &packet);
-
-        // wait emulator thread to exit
-        if (config->emulator_thread != (pthread_t)-1) {
-            pthread_join(config->emulator_thread, &thread_res);
-            config->emulator_thread = (pthread_t)-1;
-        }
-        // remove the running flag
-        config->flags &= ~((int64_t)EMULATOR_IS_RUNNING);
-    }
 }
 
 void emulator_destroy_config(emulator_config_t *config) {
@@ -445,8 +336,6 @@ void emulator_destroy_config(emulator_config_t *config) {
             fclose(config->dump_unknown);
         }
 
-        // destroy buffer
-        circ_buf_destroy(config->packet_queue);
         // free memory pool
         divert_destroy_pool(config->pool);
         free(config);

@@ -1,4 +1,6 @@
 #include "bandwidth.h"
+#include "delay.h"
+#include "emulator.h"
 #include <string.h>
 
 static void
@@ -75,7 +77,8 @@ bandwidth_pipe_process(pipe_node_t *node) {
         if (time_greater_than(&ptr->time_send, &time_now)) {
             if (!ptr->is_registered) {
                 // register timeout event
-                register_timer(node, &ptr->time_send);
+                register_timer(node, &ptr->time_send,
+                               ptr->packet->direction);
                 ptr->is_registered = 1;
             }
             break;

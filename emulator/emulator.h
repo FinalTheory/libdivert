@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include "circ_buf.h"
 
 
 enum {
@@ -29,16 +30,9 @@ enum {
 
 };
 
-// TODO: add event driven mode
-enum {
-    MODE_TIME_DRIVEN = 0,
-    MODE_EVENT_DRIVEN = 1,
-};
-
 enum {
     NEW_PACKET = 0,
     TIMEOUT_EVENT = 1,
-    EVENT_QUIT = 2,
 };
 
 
@@ -46,10 +40,6 @@ enum {
 #define EMULATOR_IS_RUNNING (1u << 0)
 #define EMULATOR_DUMP_PCAP  (1u << 1)
 #define EMULATOR_RECHECKSUM (1u << 2)
-
-
-
-#define TIMER_QUEUE_SIZE    4096
 
 
 #define BITS_PER_BYTE       8
@@ -125,11 +115,6 @@ struct pipe_node {
     struct timeval tv_start;
 };
 
-typedef struct {
-    struct timeval tv;
-    int flag;
-} timeout_event_t;
-
 struct emulator {
     uint64_t flags;                 // only in callback function and config set, safe
     divert_mem_pool_t *pool;
@@ -149,32 +134,12 @@ struct emulator {
     pid_t *pid_list;
 
     /*
-     * thread control variables
-     * initialized in emulator_create_config()
-     * and emulator_thread_func()
-     */
-    pthread_t emulator_thread;
-    pthread_t timer_thread;
-
-    /*
      * first node of processing pipes
      * and a exit pipe
      */
     pipe_node_t *pipe[3];
     uint64_t dsize[3];
     pipe_node_t *exit_pipe;
-
-    /*
-     * store all packets and events
-     */
-    circ_buf_t *packet_queue;
-
-    /*
-     * store timeout events
-     */
-    pqueue *timer_queue;
-
-    emulator_packet_t timeout_packet;
 };
 
 
@@ -200,9 +165,9 @@ void time_add(struct timeval *tv, double time);
 int is_effect_applied(packet_size_filter *filter,
                       size_t real_size);
 
-void
-register_timer(pipe_node_t *node,
-               struct timeval *tv);
+void register_timer(pipe_node_t *node,
+                    struct timeval *tv,
+                    int direction);
 
 void *emulator_thread_func(void *args);
 
@@ -213,14 +178,11 @@ void *emulator_thread_func(void *args);
 void emulator_callback(void *, void *, struct ip *, struct sockaddr *);
 
 emulator_config_t *
-emulator_create_config(divert_t *handle,
-                       size_t buf_size);
+emulator_create_config(divert_t *handle);
 
 void emulator_destroy_config(emulator_config_t *config);
 
-void emulator_start(emulator_config_t *config);
-
-void emulator_stop(emulator_config_t *config);
+void emulator_flush(emulator_config_t *config);
 
 uint64_t emulator_data_size(emulator_config_t *config, int direction);
 

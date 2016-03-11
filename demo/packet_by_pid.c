@@ -7,13 +7,8 @@
 #define MAX_PACKET_SIZE 65535
 
 
-u_char packet_buf[MAX_PACKET_SIZE];
-u_char sin_buf[2 * sizeof(struct sockaddr)];
-u_char proc_info_buf[2 * sizeof(proc_info_t)];
-
-
 void error_handler(u_int64_t flags) {
-    if (flags & DIVERT_ERROR_DIVERT_NODATA) {
+    if (flags & DIVERT_ERROR_NODATA) {
         puts("Didn't read data from divert socket or data error.");
     }
     if (flags & DIVERT_ERROR_KQUEUE) {
@@ -24,9 +19,31 @@ void error_handler(u_int64_t flags) {
     }
 }
 
-
 static pid_t pid;
 static char proc_name_buf[128];
+
+void callback(void *args, void *proc_info_p,
+              struct ip *packet, struct sockaddr *sin) {
+    proc_info_t *proc = proc_info_p;
+    packet_hdrs_t packet_hdrs;
+    divert_t *handle = args;
+    // re-inject packets into TCP/IP stack
+    divert_reinject(handle, packet, -1, sin);
+    // dump the data of IP packet
+    divert_dump_packet((u_char *)packet,
+                       &packet_hdrs,
+                       handle->errmsg);
+    // output the error message
+    if (handle->errmsg[0]) {
+        puts(handle->errmsg);
+    }
+    // get actual pid of this packet
+    pid_t cur_pid = proc->pid == -1 ? proc->epid : proc->pid;
+    if (cur_pid == pid) {
+        // print detail of that packet
+        divert_print_packet(stderr, ~0u, &packet_hdrs, NULL);
+    }
+}
 
 
 int main(int argc, char *argv[]) {
@@ -39,15 +56,14 @@ int main(int argc, char *argv[]) {
     proc_name(pid, proc_name_buf, sizeof(proc_name_buf));
     printf("Watching packets of %s: %d\n", proc_name_buf, pid);
 
-    // pointer to buffer of pktap header
-    proc_info_t *proc = (proc_info_t *)proc_info_buf;
-    packet_hdrs_t packet_hdrs;
-
     // create a handle for divert object
-    divert_t *handle = divert_create(0, DIVERT_FLAG_BLOCK_IO);
+    divert_t *handle = divert_create(0, 0);
 
     // set the error handler to display error information
     divert_set_error_handler(handle, error_handler);
+
+    // set callback function for divert handle
+    divert_set_callback(handle, callback, handle);
 
     // activate the divert handler
     divert_activate(handle);
@@ -63,39 +79,6 @@ int main(int argc, char *argv[]) {
 
     // call the non-blocking main loop
     divert_loop(handle, -1);
-
-    while (divert_is_looping(handle)) {
-        // read data from the divert handle
-        ssize_t status = divert_read(handle,
-                                     (proc_info_t *)proc_info_buf,
-                                     (struct ip *)packet_buf,
-                                     (struct sockaddr_in *)sin_buf);
-
-        // the handle is closed, then just break the loop
-        if (status == DIVERT_READ_EOF) {
-            break;
-        }
-
-        // re-inject packets into TCP/IP stack
-        divert_reinject(handle, (struct ip *)packet_buf, -1, (struct sockaddr *)sin_buf);
-
-        // dump the data of IP packet
-        divert_dump_packet(packet_buf,
-                           &packet_hdrs,
-                           handle->errmsg);
-
-        // output the error message
-        if (handle->errmsg[0]) {
-            puts(handle->errmsg);
-        }
-
-        // get actual pid of this packet
-        pid_t cur_pid = proc->pid == -1 ? proc->epid : proc->pid;
-        if (cur_pid == pid) {
-            // print detail of that packet
-            divert_print_packet(stderr, ~0u, &packet_hdrs, NULL);
-        }
-    }
 
     printf("Num reused: %zu, num new allocated: %zu, num large: %zu\n",
            handle->pool->num_reuse,

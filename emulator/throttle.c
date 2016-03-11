@@ -1,5 +1,4 @@
 #include "throttle.h"
-#include <string.h>
 
 
 static double
@@ -90,7 +89,8 @@ throttle_pipe_process(pipe_node_t *node) {
         ptr = circ_buf_head(pipe->throttle_queue);
         if (time_greater_than(&ptr->time_send, &time_now)) {
             if (!ptr->is_registered) {
-                register_timer(node, &ptr->time_send);
+                register_timer(node, &ptr->time_send,
+                               ptr->packet->direction);
                 ptr->is_registered = 1;
             }
             break;

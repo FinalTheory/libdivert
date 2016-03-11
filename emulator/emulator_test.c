@@ -13,7 +13,7 @@
 
 
 void error_handler(u_int64_t flags) {
-    if (flags & DIVERT_ERROR_DIVERT_NODATA) {
+    if (flags & DIVERT_ERROR_NODATA) {
         puts("Didn't read data from divert socket or data error.");
     }
     if (flags & DIVERT_ERROR_KQUEUE) {
@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
     if (argc == 2) {
         pid = atoi(argv[1]);
     } else {
-        puts("Usage: ./dump_divert <PID>");
+        puts("Usage: ./emulator <PID>");
         exit(EXIT_FAILURE);
     }
 
@@ -66,7 +66,7 @@ int main(int argc, char *argv[]) {
     divert_t *handle = divert_create(0, 0u);
 
     emulator_config_t *config =
-            emulator_create_config(handle, 4096);
+            emulator_create_config(handle);
 
     pipe_node_t *throttle_pipe =
             throttle_pipe_create(NULL, 8, throttle_start, throttle_end, 65535);
@@ -87,11 +87,11 @@ int main(int argc, char *argv[]) {
 
     emulator_add_flag(config, EMULATOR_RECHECKSUM);
 
-    emulator_add_pipe(config, throttle_pipe, DIRECTION_IN);
+//    emulator_add_pipe(config, throttle_pipe, DIRECTION_IN);
 //    emulator_add_pipe(config, drop_pipe, DIRECTION_IN);
 //    emulator_add_pipe(config, bandwidth_pipe, DIRECTION_IN);
 //    emulator_add_pipe(config, disorder_pipe, DIRECTION_IN);
-//    emulator_add_pipe(config, delay_pipe, DIRECTION_IN);
+    emulator_add_pipe(config, delay_pipe, DIRECTION_IN);
 
     emulator_set_dump_pcap(config, "/Users/baidu/Downloads");
 
@@ -99,8 +99,6 @@ int main(int argc, char *argv[]) {
         puts(errmsg);
         exit(EXIT_FAILURE);
     }
-
-    emulator_start(config);
 
     // set the callback function to handle packets
     divert_set_callback(handle, emulator_callback, config);
@@ -125,7 +123,7 @@ int main(int argc, char *argv[]) {
     // call the main loop
     divert_loop(handle, -1);
 
-    emulator_stop(config);
+    emulator_flush(config);
 
     printf("Num reused: %zu, num new allocated: %zu, num large: %zu\n",
            config->pool->num_reuse,

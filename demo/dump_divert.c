@@ -1,11 +1,9 @@
 #include "divert.h"
-#include <stdlib.h>
-#include <arpa/inet.h>
 #include <libproc.h>
 
 
 void error_handler(u_int64_t flags) {
-    if (flags & DIVERT_ERROR_DIVERT_NODATA) {
+    if (flags & DIVERT_ERROR_NODATA) {
         puts("Didn't read data from divert socket or data error.");
     }
     if (flags & DIVERT_ERROR_KQUEUE) {
@@ -30,7 +28,8 @@ const size_t size_MB = 1024 * 1024;
 
 struct in_addr localhost;
 
-void callback(void *args, void *proc_info_p, struct ip *packet, struct sockaddr *sin) {
+void callback(void *args, void *proc_info_p,
+              struct ip *packet, struct sockaddr *sin) {
     proc_info_t *proc = proc_info_p;
     divert_t *handle = (divert_t *)args;
 
@@ -120,15 +119,23 @@ int main(int argc, char *argv[]) {
     printf("Divert socket buffer size: %zu\n", handle->bufsize);
 
     // call the main loop
-    divert_loop(handle, -1);
+    if (divert_loop(handle, -1) != 0) {
+        puts(handle->errmsg);
+    }
 
     // output statics information
     printf("Diverted packets: %llu\n", handle->num_diverted);
+
+    printf("Num reused: %zu, num new allocated: %zu, num large: %zu\n",
+           handle->pool->num_reuse,
+           handle->pool->num_alloc,
+           handle->pool->num_large);
 
     // clean the handle to release resources
     if (divert_close(handle) == 0) {
         puts("Successfully cleaned, exit.");
     }
+
     fclose(fp1);
     fclose(fp2);
     fclose(fp3);

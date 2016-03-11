@@ -2,7 +2,6 @@
 #define __PQUEUE__H__
 
 #include <unistd.h>
-#include <pthread.h>
 
 /**
 * Debugging macro .
@@ -34,27 +33,19 @@ typedef struct PQueue_s {
     void **data;
     /* A pointer to a comparator function, used to prioritize elements */
     int (*cmp)(const void *d1, const void *d2);
-    /* Indicate if this queue should be thread safe */
-    int thread_safe;
-    pthread_mutex_t mutex;
-    pthread_cond_t UntilNotEmpty;
-    pthread_cond_t UntilNotFull;
 } pqueue;
 
 /** Allocates memory for a new Priority Queue .
 Needs a pointer to a comparator function, thus establishing priorities .
 */
 pqueue *pqueue_new(int (*cmp)(const void *d1, const void *d2),
-                   size_t capacity, int thread_safe);
+                   size_t capacity);
 
 /** De-allocates memory for a given Priority Queue */
 void pqueue_destroy(pqueue *q);
 
 /** Add an element inside the Priority Queue */
-void pqueue_enqueue(pqueue *q, const void *data);
-
-void pqueue_wait_until(pqueue *q,
-                       struct timeval *timeout);
+int pqueue_enqueue(pqueue *q, const void *data);
 
 /** Removes the element with the greatest priority from within the Queue */
 void *pqueue_dequeue(pqueue *q);

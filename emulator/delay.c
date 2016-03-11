@@ -92,7 +92,8 @@ delay_pipe_process(pipe_node_t *node) {
         if (time_greater_than(&ptr->time_send, &time_now)) {
             if (!ptr->is_registered) {
                 // register timeout event
-                register_timer(node, &ptr->time_send);
+                register_timer(node, &ptr->time_send,
+                               ptr->packet->direction);
                 ptr->is_registered = 1;
             }
             break;
@@ -143,7 +144,7 @@ pipe_node_t *delay_pipe_create(packet_size_filter *filter,
     }
 
     MALLOC_AND_COPY(pipe->delay_time, delay_time, num, float)
-    pipe->delay_queue = pqueue_new(cmp_delay_packet, queue_size, 0);
+    pipe->delay_queue = pqueue_new(cmp_delay_packet, queue_size);
 
     node->pipe_type = PIPE_DELAY;
     node->process = delay_pipe_process;

@@ -1,4 +1,4 @@
-#include "pcap/pcap-int.h"
+#include "pcap/pcap-int.h" 
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -11,7 +11,6 @@
 #include <net/ethernet.h>
 #include <netinet/ip.h>
 #include <netinet/udp.h>
-#include <pthread.h>
 #include <libproc.h>
 #include "divert.h"
 #include "divert_ipfw.h"
@@ -20,10 +19,35 @@
 #include "nids.h"
 #define TUPLE4
 #include "KernFunc.h"
+#include "print_packet.h"
+
+int time_greater_than(struct timeval *a,
+                      struct timeval *b);
 
 extern pid_t tcp_stream_pid, tcp_stream_epid;
 
 static volatile int ipfw_rule_index = DEFAULT_IPFW_RULE_ID;
+
+static int
+cmp_time_event(const void *x, const void *y) {
+    if (x == NULL) { return 1; }
+    if (y == NULL) { return -1; }
+    const timeout_event_t *a = x;
+    const timeout_event_t *b = y;
+    uint64_t val_a = a->tv.tv_sec *
+                     (uint64_t)1000000 +
+                     a->tv.tv_usec;
+    uint64_t val_b = b->tv.tv_sec *
+                     (uint64_t)1000000 +
+                     b->tv.tv_usec;
+    if (val_a > val_b) {
+        return -1;
+    } else if (val_a < val_b) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
 
 /*
  * only constant and parameter variables could be assigned here
@@ -41,10 +65,10 @@ divert_t *divert_create(int port_number, u_int32_t flags) {
         free(divert_handle);
         return NULL;
     }
+    divert_handle->timer_queue = pqueue_new(cmp_time_event,
+                                            TIMER_QUEUE_SIZE);
     divert_handle->flags = flags;
-    divert_handle->thread_ctl = (pthread_t)-1;
     divert_handle->divert_port = port_number;
-    divert_handle->thread_buffer_size = PACKET_BUFFER_SIZE;
     divert_handle->ipfw_id = ipfw_rule_index++;
 
     return divert_handle;
@@ -52,11 +76,6 @@ divert_t *divert_create(int port_number, u_int32_t flags) {
 
 int divert_set_data_buffer_size(divert_t *handle, size_t bufsize) {
     handle->bufsize = bufsize;
-    return 0;
-}
-
-int divert_set_thread_buffer_size(divert_t *handle, size_t bufsize) {
-    handle->thread_buffer_size = bufsize;
     return 0;
 }
 
@@ -126,10 +145,24 @@ int divert_set_callback(divert_t *handle, divert_callback_t callback, void *args
     return 0;
 }
 
+int divert_register_timer(divert_t *handle,
+                          const struct timeval *timeout,
+                          void *data, uint32_t flag) {
+    timeout_event_t *event =
+            divert_mem_alloc(handle->pool,
+                             sizeof(timeout_event_t));
+    if (NULL == event) { return -1; }
+    event->tv = *timeout;
+    event->data = data;
+    event->flag = flag;
+    pqueue_enqueue(handle->timer_queue, event);
+    return 0;
+}
+
 int divert_update_ipfw(divert_t *handle, char *divert_filter) {
     char *new_filter = strdup(divert_filter);
     int ret_val = 0;
-    if (handle->is_looping) {
+    if (handle->loop_continue) {
         ret_val = ipfw_delete(handle->ipfw_id, handle->errmsg);
         if (ret_val != 0) { goto fail; }
         ret_val = ipfw_setup(new_filter,
@@ -186,13 +219,6 @@ static int divert_init_divert_socket(divert_t *divert_handle) {
         } else {
             divert_handle->divert_port = ntohs(divert_port_addr.sin_port);
         }
-    }
-
-    /* allocate thread buffer to store labeled packet */
-    divert_handle->thread_buffer =
-            circ_buf_create(divert_handle->thread_buffer_size, 1);
-    if (divert_handle->thread_buffer == NULL) {
-        return DIVERT_BUF_FAILURE;
     }
 
     if (divert_handle->bufsize == 0) {
@@ -406,14 +432,9 @@ int divert_activate(divert_t *divert_handle) {
         return status;
     }
 
-    // if uses blocking IO then set the callback to NULL
-    if (divert_handle->flags & DIVERT_FLAG_BLOCK_IO) {
-        divert_handle->callback = NULL;
-    } else {
-        if (divert_handle->callback == NULL) {
-            sprintf(divert_handle->errmsg, "Error: callback function not set!");
-            return CALLBACK_NOT_FOUND;
-        }
+    if (divert_handle->callback == NULL) {
+        sprintf(divert_handle->errmsg, "Error: callback function not set!");
+        return CALLBACK_NOT_FOUND;
     }
 
     if (pipe(divert_handle->pipe_fd) != 0 ||
@@ -446,16 +467,6 @@ int divert_activate(divert_t *divert_handle) {
     return 0;
 }
 
-static inline
-packet_info_t *divert_new_error_packet(divert_t *handle,
-                                       u_int64_t flag) {
-    packet_info_t *new_packet =
-            divert_mem_alloc(handle->pool, sizeof(packet_info_t));
-    new_packet->ip_data = NULL;
-    new_packet->flag = flag;
-    return new_packet;
-}
-
 static void divert_feed_nids(struct ip *packet) {
     struct timeval tv;
     struct timezone tz;
@@ -470,187 +481,121 @@ static void divert_feed_nids(struct ip *packet) {
     nids_pcap_handler(NULL, &pkthdr, (u_char *)packet);
 }
 
-static void *divert_thread_callback(void *arg) {
-    packet_info_t *packet;
-    divert_t *handle = (divert_t *)arg;
-    circ_buf_t *buf = handle->thread_buffer;
-    divert_callback_t callback = handle->callback;
-    void *callback_args = handle->callback_args;
-    while (1) {
-        packet = circ_buf_remove(buf);
-        // if this is a normal data packet
-        if (packet->flag & DIVERT_RAW_IP_PACKET) {
-            // call the callback function
-            if (handle->flags & DIVERT_FLAG_TCP_REASSEM) {
-                tcp_stream_pid = packet->proc_info.pid;
-                tcp_stream_epid = packet->proc_info.epid;
-                divert_feed_nids(packet->ip_data);
-            }
-            callback(callback_args, &packet->proc_info,
-                     packet->ip_data, &packet->sin);
-            divert_mem_free(handle->pool, packet->ip_data);
-            divert_mem_free(handle->pool, packet);
-        } else if (packet->flag &
-                   (DIVERT_ERROR_DIVERT_NODATA |
-                    DIVERT_ERROR_KQUEUE)) {
-            // call the error handling function
-            if (handle->err_handler != NULL) {
-                handle->err_handler(packet->flag);
-            }
-            divert_mem_free(handle->pool, packet);
-        } else if (packet->flag & DIVERT_STOP_LOOP) {
-            divert_mem_free(handle->pool, packet);
-            break;
-        }
-    }
-    handle->is_looping = 0;
-    return NULL;
-}
-
-static void divert_loop_finish(divert_t *handle) {
-    // first clean firewall rule
-    ipfw_delete(handle->ipfw_id, handle->errmsg);
-
-    // then re-inject all buffered packets
-    while (!circ_buf_is_empty(handle->thread_buffer)) {
-        packet_info_t *packet = circ_buf_remove(handle->thread_buffer);
-        if (packet == NULL) { continue; }
-        if (packet->flag & DIVERT_STOP_LOOP) {
-            circ_buf_insert(handle->thread_buffer, packet);
-            break;
-        }
-        if (packet->flag & DIVERT_RAW_IP_PACKET) {
-            divert_reinject(handle, packet->ip_data, -1, &packet->sin);
-            divert_mem_free(handle->pool, packet->ip_data);
-        }
-        divert_mem_free(handle->pool, packet);
-    }
-
-    // finally send a message to tell that loop is really stopped
-    write(handle->exit_fd[1], "e", 1);
-}
-
-void divert_loop_join(divert_t *handle) {
-    if (handle->thread_ctl != (pthread_t)-1) {
-        void *res;
+void divert_loop_wait(divert_t *handle) {
+    if (handle->is_looping) {
         char str_buf[PIPE_BUFFER_SIZE];
-        pthread_join(handle->thread_ctl, &res);
-        handle->thread_ctl = (pthread_t)-1;
         read(handle->exit_fd[0], str_buf, sizeof(str_buf));
+        // do not need to modify handle->is_looping
+        // this value is changed in divert_loop
         assert(str_buf[0] == 'e');
     }
 }
 
-static void divert_loop_slow_exit(divert_t *divert_handle, int count) {
-    // number of diverted bytes
-    ssize_t num_divert;
-    // struct to hold packet headers
-    packet_hdrs_t packet_hdrs;
-    // error message buffer
-    char errmsg[DIVERT_ERRBUF_SIZE];
-    socklen_t sin_len = sizeof(struct sockaddr);
+int divert_loop(divert_t *divert_handle, int count) {
+    divert_handle->errmsg[0] = 0;
+    // wait until previous looping is exited
+    divert_loop_wait(divert_handle);
 
+    // set current looping flag
     divert_handle->is_looping = 1;
-    divert_handle->num_diverted = 0;
-    divert_handle->num_unknown = 0;
-    while (divert_handle->is_looping) {
-        struct sockaddr sin;
 
-        // returns a packet of IP protocol structure
-        do {
-            num_divert = recvfrom(divert_handle->divert_fd,
-                                  divert_handle->divert_buffer,
-                                  divert_handle->bufsize, 0,
-                                  &sin, &sin_len);
-        } while (num_divert == -1 && errno == EINTR);
-
-
-        if (num_divert > 0) {
-            // extract the headers of current packet
-            divert_dump_packet(divert_handle->divert_buffer,
-                               &packet_hdrs, errmsg);
-            if (packet_hdrs.size_ip) {
-                // if packet is not found in the queue, then just send it to user
-                size_t ip_length = ntohs(packet_hdrs.ip_hdr->ip_len);
-                packet_info_t *new_packet = divert_mem_alloc(divert_handle->pool,
-                                                             sizeof(packet_info_t));
-                new_packet->sin = sin;
-                new_packet->flag = DIVERT_RAW_IP_PACKET;
-                // allocate memory
-                new_packet->ip_data = divert_mem_alloc(divert_handle->pool, ip_length);
-                divert_query_proc_by_packet(divert_handle,
-                                            packet_hdrs.ip_hdr, &sin,
-                                            &new_packet->proc_info);
-                // and copy data
-                memcpy(new_packet->ip_data, packet_hdrs.ip_hdr, ip_length);
-                circ_buf_insert(divert_handle->thread_buffer, new_packet);
-                // update statistics
-                if (new_packet->proc_info.pid == -1 &&
-                    new_packet->proc_info.epid == -1) {
-                    divert_handle->num_unknown++;
-                }
-                divert_handle->num_diverted++;
-            } else {
-                // IP packet is invalid
-                circ_buf_insert(divert_handle->thread_buffer,
-                                divert_new_error_packet(divert_handle, DIVERT_ERROR_INVALID_IP));
-            }
-        } else {
-            // no valid data, so insert a flag into thread buffer
-            circ_buf_insert(divert_handle->thread_buffer,
-                            divert_new_error_packet(divert_handle, DIVERT_ERROR_DIVERT_NODATA));
-        }
-        if (count > 0 && divert_handle->num_diverted > count) {
-            goto finish;
-        }
+    // setup firewall to redirect all traffic to divert socket
+    if (ipfw_setup(divert_handle->ipfw_filter,
+                   (u_short)divert_handle->ipfw_id,
+                   (u_short)divert_handle->divert_port,
+                   divert_handle->errmsg) != 0) {
+        // error message is set, just return is OK
+        return IPFW_FAILURE;
     }
-    finish:
-    divert_handle->is_looping = 0;
-    // insert an item into the thread buffer to stop another thread
-    circ_buf_insert(divert_handle->thread_buffer,
-                    divert_new_error_packet(divert_handle, DIVERT_STOP_LOOP));
-
-    // call divert_loop_finish() to clear ipfw rule
-    divert_loop_finish(divert_handle);
-}
-
-static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
     // number of diverted bytes
     ssize_t num_divert;
     // struct to hold packet headers
     packet_hdrs_t packet_hdrs;
     // error message buffer
-    char errmsg[DIVERT_ERRBUF_SIZE];
     socklen_t sin_len = sizeof(struct sockaddr);
-
-    divert_handle->is_looping = 1;
     divert_handle->num_diverted = 0;
     divert_handle->num_unknown = 0;
-    /* register two file descriptor into kqueue */
+    divert_callback_t callback = divert_handle->callback;
+    void *callback_args = divert_handle->callback_args;
+
+    // register two file descriptor into kqueue
     int kq = kqueue();
     struct kevent changes[2];
     EV_SET(&changes[0], divert_handle->divert_fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
     EV_SET(&changes[1], divert_handle->pipe_fd[0], EVFILT_READ, EV_ADD, 0, 0, NULL);
     int ret = kevent(kq, changes, 2, NULL, 0, NULL);
     if (ret == -1) {
-        fprintf(stderr, "kevent failed: %s", strerror(errno));
-        exit(EXIT_FAILURE);
+        sprintf(divert_handle->errmsg, "kevent failed: %s", strerror(errno));
+        return -1;
     }
 
     int num_events;
     /* array to hold kqueue events */
     struct kevent events[MAX_EVENT_COUNT];
-    while (divert_handle->is_looping) {
-        struct sockaddr sin;
+    divert_handle->loop_continue = 1;
+    struct timeval tv;
+    struct timezone tz;
+    proc_info_t proc_info;
+    struct sockaddr sin;
+
+    while (divert_handle->loop_continue) {
+        // find a nearest timer from timer queue (priority queue)
+        struct timespec timeout_val = {0, 500000}, *timeout_ptr;
+#ifdef USE_TICKLESS
+        timeout_ptr = NULL;
+        if (!pqueue_is_empty(divert_handle->timer_queue)) {
+            // get the nearest timer
+            timeout_event_t *ptr =
+                    pqueue_head(divert_handle->timer_queue);
+            // get current time stamp
+            gettimeofday(&tv, &tz);
+            // calculate max waiting time
+            int64_t secs = ptr->tv.tv_sec - (int64_t)tv.tv_sec;
+            int64_t usecs = ptr->tv.tv_usec - (int64_t)tv.tv_usec;
+            if (usecs < 0) {
+                secs -= 1;
+                usecs += 1000000;
+            }
+            if (secs >= 0 && usecs >= 0) {
+                timeout_val.tv_sec = secs;
+                timeout_val.tv_nsec = usecs * 1000;
+                timeout_ptr = &timeout_val;
+            }
+        }
+#else
+        timeout_ptr = &timeout_val;
+#endif
+
         // if the kevent is interrupted by signal, then just retry it
         do {
-            num_events = kevent(kq, NULL, 0, events, MAX_EVENT_COUNT, NULL);
+            num_events = kevent(kq, NULL, 0, events, MAX_EVENT_COUNT, timeout_ptr);
         } while (num_events == -1 && errno == EINTR);
 
-        if (num_events == -1) {
-            circ_buf_insert(divert_handle->thread_buffer,
-                            divert_new_error_packet(divert_handle, DIVERT_ERROR_KQUEUE));
-        } else {
+        if (num_events >= 0) {
+            // we first delete all timers which are timeout
+            gettimeofday(&tv, &tz);
+            while (!pqueue_is_empty(divert_handle->timer_queue)) {
+                timeout_event_t *ptr =
+                        pqueue_head(divert_handle->timer_queue);
+                if (ptr == NULL) {
+                    fprintf(stderr, "Warning: Invalid timer.");
+                    continue;
+                }
+                // if this timer is timeout
+                if (time_greater_than(&tv, &ptr->tv)) {
+                    {
+                        double delta = tv.tv_sec - ptr->tv.tv_sec + (tv.tv_usec - ptr->tv.tv_usec) / 1000000.;
+                        printf("delta = %.2f\n", delta * 1000.);
+                    }
+                    ptr = pqueue_dequeue(divert_handle->timer_queue);
+                    callback(callback_args, ptr->data, NULL, NULL);
+                    if (ptr->data != NULL) { divert_mem_free(divert_handle->pool, ptr->data); }
+                    divert_mem_free(divert_handle->pool, ptr);
+                } else {
+                    break;
+                }
+            }
+            // then we process all ready fds
             for (int i = 0; i < num_events; i++) {
                 uintptr_t fd = events[i].ident;
                 if (fd == divert_handle->divert_fd) {
@@ -665,36 +610,43 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
                     if (num_divert > 0) {
                         // extract the headers of current packet
                         divert_dump_packet(divert_handle->divert_buffer,
-                                           &packet_hdrs, errmsg);
+                                           &packet_hdrs, divert_handle->errmsg);
+                        // if this is a valid IP packet
                         if (packet_hdrs.size_ip) {
-                            // if packet is not found in the queue, then just send it to user
-                            size_t ip_length = ntohs(packet_hdrs.ip_hdr->ip_len);
-                            packet_info_t *new_packet = divert_mem_alloc(divert_handle->pool, sizeof(packet_info_t));
-                            new_packet->sin = sin;
-                            new_packet->flag = DIVERT_RAW_IP_PACKET;
-                            // allocate memory
-                            new_packet->ip_data = divert_mem_alloc(divert_handle->pool, ip_length);
+                            // query process of this packet
                             divert_query_proc_by_packet(divert_handle,
                                                         packet_hdrs.ip_hdr, &sin,
-                                                        &new_packet->proc_info);
-                            // and copy data
-                            memcpy(new_packet->ip_data, packet_hdrs.ip_hdr, ip_length);
-                            circ_buf_insert(divert_handle->thread_buffer, new_packet);
-                            // update statistics
-                            if (new_packet->proc_info.pid == -1 &&
-                                new_packet->proc_info.epid == -1) {
+                                                        &proc_info);
+
+                            // first feed this IP packet into libnids
+                            if (divert_handle->flags & DIVERT_FLAG_TCP_REASSEM) {
+                                tcp_stream_pid = proc_info.pid;
+                                tcp_stream_epid = proc_info.epid;
+                                size_t ip_len = ntohs(packet_hdrs.ip_hdr->ip_len);
+                                struct ip *ip_packet = divert_mem_alloc(divert_handle->pool, ip_len);
+                                memcpy(ip_packet, packet_hdrs.ip_hdr, ip_len);
+                                divert_checksum(ip_packet);
+                                divert_feed_nids(ip_packet);
+                                divert_mem_free(divert_handle->pool, ip_packet);
+                                //divert_print_packet(stderr, ~0u, &packet_hdrs, NULL);
+                            }
+
+                            // then call the callback function
+                            callback(callback_args, &proc_info, packet_hdrs.ip_hdr, &sin);
+
+                            // finally update statistics
+                            if (proc_info.pid == -1 &&
+                                proc_info.epid == -1) {
                                 divert_handle->num_unknown++;
                             }
                             divert_handle->num_diverted++;
                         } else {
                             // IP packet is invalid
-                            circ_buf_insert(divert_handle->thread_buffer,
-                                            divert_new_error_packet(divert_handle, DIVERT_ERROR_INVALID_IP));
+                            if (divert_handle->err_handler) { divert_handle->err_handler(DIVERT_ERROR_INVALID_IP); }
                         }
                     } else {
                         // no valid data, so insert a flag into thread buffer
-                        circ_buf_insert(divert_handle->thread_buffer,
-                                        divert_new_error_packet(divert_handle, DIVERT_ERROR_DIVERT_NODATA));
+                        if (divert_handle->err_handler) { divert_handle->err_handler(DIVERT_ERROR_NODATA); }
                     }
                     if (count > 0 && divert_handle->num_diverted > count) {
                         goto finish;
@@ -703,76 +655,32 @@ static void divert_loop_fast_exit(divert_t *divert_handle, int count) {
                     // end the event loop
                     char pipe_buf[PIPE_BUFFER_SIZE];
                     read(divert_handle->pipe_fd[0], pipe_buf, sizeof(pipe_buf));
-                    if (pipe_buf[0] == 'q') {
-                        goto finish;
-                    }
+                    assert(pipe_buf[0] == 'q');
+                    goto finish;
                 }
             }
+        } else if (num_events == -1) {
+            if (divert_handle->err_handler) { divert_handle->err_handler(DIVERT_ERROR_KQUEUE); }
         }
     }
     finish:
+    divert_handle->loop_continue = 0;
+
+    // first clean firewall rule
+    ipfw_delete(divert_handle->ipfw_id, divert_handle->errmsg);
+
+    // then clear the timer queue
+    while (pqueue_size(divert_handle->timer_queue) > 0) {
+        timeout_event_t *ptr = pqueue_dequeue(divert_handle->timer_queue);
+        if (ptr->data != NULL) { divert_mem_free(divert_handle->pool, ptr->data); }
+        divert_mem_free(divert_handle->pool, ptr);
+    }
+
+    // send a message to tell that loop is really stopped
+    write(divert_handle->exit_fd[1], "e", 1);
+
+    // finally clear the is_looping flag
     divert_handle->is_looping = 0;
-    // insert an item into the thread buffer to stop another thread
-    circ_buf_insert(divert_handle->thread_buffer,
-                    divert_new_error_packet(divert_handle, DIVERT_STOP_LOOP));
-
-    // call divert_loop_finish() to clear ipfw rule
-    divert_loop_finish(divert_handle);
-}
-
-typedef void (*divert_loop_func_t)(divert_t *, int);
-
-// this typedef is only used here
-typedef struct {
-    divert_loop_func_t loop_function;
-    divert_t *divert_handle;
-    int count;
-} __tmp_data_t;
-
-void *divert_non_block_thread(void *args) {
-    __tmp_data_t *data = (__tmp_data_t *)args;
-    data->loop_function(data->divert_handle, data->count);
-    return NULL;
-}
-
-int divert_loop(divert_t *divert_handle, int count) {
-    divert_handle->errmsg[0] = 0;
-
-    // wait until previous looping is exited
-    divert_loop_join(divert_handle);
-
-    // setup firewall to redirect all traffic to divert socket
-    if (ipfw_setup(divert_handle->ipfw_filter,
-                   (u_short)divert_handle->ipfw_id,
-                   (u_short)divert_handle->divert_port,
-                   divert_handle->errmsg) != 0) {
-        // error message is set, just return is OK
-        return IPFW_FAILURE;
-    }
-
-    divert_loop_func_t loop_function;
-    if (divert_handle->flags & DIVERT_FLAG_FAST_EXIT) {
-        loop_function = divert_loop_fast_exit;
-    } else {
-        loop_function = divert_loop_slow_exit;
-    }
-
-    // if use block IO, then
-    // this function should be non-blocking
-    if (divert_handle->flags & DIVERT_FLAG_BLOCK_IO) {
-        __tmp_data_t *args = divert_mem_alloc(divert_handle->pool, sizeof(__tmp_data_t));
-        args->count = count;
-        args->divert_handle = divert_handle;
-        args->loop_function = loop_function;
-        pthread_create(&divert_handle->thread_ctl, NULL,
-                       divert_non_block_thread, args);
-        // wait until the main loop is started
-        while (!divert_handle->is_looping);
-    } else {
-        pthread_create(&divert_handle->thread_ctl, NULL,
-                       divert_thread_callback, divert_handle);
-        loop_function(divert_handle, count);
-    }
     return 0;
 }
 
@@ -791,50 +699,6 @@ int divert_is_inbound(struct sockaddr *sin_raw, char *interface) {
 int divert_is_outbound(struct sockaddr *sin_raw) {
     struct sockaddr_in *sin = (struct sockaddr_in *)sin_raw;
     return sin->sin_addr.s_addr == INADDR_ANY;
-}
-
-ssize_t divert_read(divert_t *handle,
-                    proc_info_t *proc_info_buf,
-                    struct ip *ip_data,
-                    struct sockaddr_in *sin) {
-    int ret_val = 0;
-    // make it non-blocking if event loop is stopped
-    if (!handle->is_looping ||
-        handle->thread_buffer == NULL) {
-        ret_val = DIVERT_READ_EOF;
-    } else {
-        packet_info_t *packet =
-                circ_buf_remove(handle->thread_buffer);
-        // do flag checking
-        if (packet->flag & DIVERT_RAW_IP_PACKET) {
-            // copy the data to user buffer
-            memcpy(ip_data, packet->ip_data,
-                   ntohs(packet->ip_data->ip_len));
-            memcpy(sin, &packet->sin, sizeof(struct sockaddr));
-            if (handle->flags & DIVERT_FLAG_TCP_REASSEM) {
-                tcp_stream_pid = packet->proc_info.pid;
-                tcp_stream_epid = packet->proc_info.epid;
-                divert_feed_nids(packet->ip_data);
-            }
-            memcpy(proc_info_buf, &packet->proc_info, sizeof(proc_info_t));
-            // release the allocated memory
-            divert_mem_free(handle->pool, packet->ip_data);
-            divert_mem_free(handle->pool, packet);
-            ret_val = 0;
-        } else if (packet->flag &
-                   (DIVERT_ERROR_DIVERT_NODATA |
-                    DIVERT_ERROR_KQUEUE)) {
-            divert_mem_free(handle->pool, packet);
-            ret_val = (int)packet->flag;
-        } else if (packet->flag & DIVERT_STOP_LOOP) {
-            divert_mem_free(handle->pool, packet);
-            handle->is_looping = 0;
-            ret_val = DIVERT_READ_EOF;
-        } else {
-            ret_val = DIVERT_READ_UNKNOWN_FLAG;
-        }
-    }
-    return ret_val;
 }
 
 void divert_checksum(struct ip *ip_data) {
@@ -901,32 +765,28 @@ void divert_loop_stop(divert_t *handle) {
     if (!handle->is_looping) { return; }
 
     // set loop flag to zero
-    handle->is_looping = 0;
+    handle->loop_continue = 0;
 
-    // write message to PIPE to break loop
-    if (handle->flags & DIVERT_FLAG_FAST_EXIT) {
-        // write data into pipe to exit event loop
-        write(handle->pipe_fd[1], "q", 1);
-    }
+    // write data into pipe to quit event loop
+    write(handle->pipe_fd[1], "q", 1);
 }
 
 int divert_close(divert_t *divert_handle) {
     divert_handle->errmsg[0] = 0;
 
     // first wait until divert loop is exited
-    divert_loop_join(divert_handle);
+    divert_loop_wait(divert_handle);
 
     // close the divert socket and release the buffer
     close(divert_handle->divert_fd);
     if (divert_handle->divert_buffer != NULL) {
         divert_mem_free(divert_handle->pool,
                         divert_handle->divert_buffer);
-        circ_buf_destroy(divert_handle->thread_buffer);
     }
 
     // close the kext communication descriptor
     close(divert_handle->kext_fd);
-    // close the pipe descriptor
+    // close the pipe descriptors
     close(divert_handle->pipe_fd[0]);
     close(divert_handle->pipe_fd[1]);
     close(divert_handle->exit_fd[0]);
@@ -951,7 +811,6 @@ static divert_signal_t divert_signal_func[MAX_SIGNAL_NUM] = {NULL,};
 static void *divert_signal_data[MAX_SIGNAL_NUM] = {NULL,};
 
 static u_char divert_signal_flag[MAX_SIGNAL_NUM] = {0,};
-
 
 void divert_signal_handler(int signum) {
     // if the signal handler is registered

@@ -5,8 +5,8 @@
 extern "C" {
 #endif
 
-#include "circ_buf.h"
 #include "divert_mem_pool.h"
+#include "pqueue.h"
 #include <stdio.h>
 #include <netinet/ip.h>
 #include <libnet.h>
@@ -32,6 +32,7 @@ extern "C" {
 #define DEFAULT_IPFW_RULE_ID    1
 #define MAX_EVENT_COUNT         16
 #define NUM_TCP_STREAMS         2048
+#define TIMER_QUEUE_SIZE        4096
 
 // some default buffer size
 // warning: PACKET_BUFFER_SIZE should never be greater than SEM_VALUE_MAX
@@ -45,20 +46,15 @@ extern "C" {
  * you can choose to use extended information
  * or just divert the raw IP packets
  */
-#define DIVERT_FLAG_FAST_EXIT    (1u << 1)
-#define DIVERT_FLAG_BLOCK_IO     (1u << 2)
-#define DIVERT_FLAG_TCP_REASSEM  (1u << 3)
+#define DIVERT_FLAG_TCP_REASSEM  1u
 
 /*
  * flags for packet buffer and error handling
  */
-#define DIVERT_READ_EOF             (-1)
-#define DIVERT_READ_UNKNOWN_FLAG    (-2)
 #define DIVERT_RAW_IP_PACKET        (1u)
-#define DIVERT_ERROR_DIVERT_NODATA  (1u << 1)
-#define DIVERT_STOP_LOOP            (1u << 2)
-#define DIVERT_ERROR_KQUEUE         (1u << 3)
-#define DIVERT_ERROR_INVALID_IP     (1u << 4)
+#define DIVERT_ERROR_NODATA         (1u << 1)
+#define DIVERT_ERROR_KQUEUE         (1u << 2)
+#define DIVERT_ERROR_INVALID_IP     (1u << 3)
 
 // typedef for divert callback function
 typedef void (*divert_callback_t)(void *args, void *proc_info,
@@ -90,12 +86,6 @@ typedef struct {
     size_t bufsize;
 
     /*
-     * pcap handler
-     */
-    circ_buf_t *thread_buffer;    // buffer for labeled packet
-    size_t thread_buffer_size;      // buffer size of labeled packet
-
-    /*
      * statics information
      */
     u_int64_t num_unknown;
@@ -107,10 +97,10 @@ typedef struct {
     divert_error_handler_t err_handler;
     divert_callback_t callback;
     void *callback_args;
-    volatile u_char is_looping;
+    pqueue *timer_queue;
+    volatile u_char loop_continue, is_looping;
 
     char *ipfw_filter;
-    pthread_t thread_ctl;
     libnet_t *libnet;
     in_addr_t iface_addr;
     in_addr_t iface_mask;
@@ -139,11 +129,10 @@ typedef struct {
 } proc_info_t;
 
 typedef struct {
-    u_int64_t flag;
-    struct ip *ip_data;
-    struct sockaddr sin;
-    proc_info_t proc_info;
-} packet_info_t;
+    struct timeval tv;
+    void *data;
+    uint32_t flag;
+} timeout_event_t;
 
 divert_t *divert_create(int port_number, u_int32_t flags);
 
@@ -173,10 +162,9 @@ int divert_activate(divert_t *divert_handle);
 
 int divert_loop(divert_t *divert_handle, int count);
 
-ssize_t divert_read(divert_t *handle,
-                    proc_info_t *proc_info_buf,
-                    struct ip *ip_data,
-                    struct sockaddr_in *sin);
+int divert_register_timer(divert_t *handle,
+                          const struct timeval *timeout,
+                          void *data, uint32_t flag);
 
 int divert_query_proc_by_packet(divert_t *handle,
                                 struct ip *ip_hdr,
@@ -203,7 +191,7 @@ int divert_is_looping(divert_t *handle);
 
 void divert_loop_stop(divert_t *handle);
 
-void divert_loop_join(divert_t *handle);
+void divert_loop_wait(divert_t *handle);
 
 /*
  * this function *SHOULD* be called within the thread you call divert_loop()
