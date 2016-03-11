@@ -137,7 +137,7 @@ throttle_pipe_create(packet_size_filter *filter,
 
     MALLOC_AND_COPY(pipe->t_start, t_start, num, float)
     MALLOC_AND_COPY(pipe->t_end, t_end, num, float)
-    pipe->throttle_queue = circ_buf_create(queue_size, 0);
+    pipe->throttle_queue = circ_buf_create(queue_size);
 
     node->pipe_type = PIPE_THROTTLE;
     node->insert = throttle_pipe_insert;

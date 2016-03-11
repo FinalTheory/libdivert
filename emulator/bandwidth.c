@@ -126,7 +126,7 @@ pipe_node_t *bandwidth_pipe_create(packet_size_filter *filter,
 
     MALLOC_AND_COPY(pipe->t, t, num, float)
     MALLOC_AND_COPY(pipe->bandwidth, bandwidth, num, float)
-    pipe->buffer = circ_buf_create(queue_size, 0);
+    pipe->buffer = circ_buf_create(queue_size);
 
     node->pipe_type = PIPE_BANDWIDTH;
     node->process = bandwidth_pipe_process;

@@ -155,8 +155,7 @@ int divert_register_timer(divert_t *handle,
     event->tv = *timeout;
     event->data = data;
     event->flag = flag;
-    pqueue_enqueue(handle->timer_queue, event);
-    return 0;
+    return pqueue_enqueue(handle->timer_queue, event);
 }
 
 int divert_update_ipfw(divert_t *handle, char *divert_filter) {
@@ -583,10 +582,6 @@ int divert_loop(divert_t *divert_handle, int count) {
                 }
                 // if this timer is timeout
                 if (time_greater_than(&tv, &ptr->tv)) {
-                    {
-                        double delta = tv.tv_sec - ptr->tv.tv_sec + (tv.tv_usec - ptr->tv.tv_usec) / 1000000.;
-                        printf("delta = %.2f\n", delta * 1000.);
-                    }
                     ptr = pqueue_dequeue(divert_handle->timer_queue);
                     callback(callback_args, ptr->data, NULL, NULL);
                     if (ptr->data != NULL) { divert_mem_free(divert_handle->pool, ptr->data); }
