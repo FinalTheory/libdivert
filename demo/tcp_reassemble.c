@@ -1,8 +1,5 @@
 #include "divert.h"
-#include "string.h"
 #include "nids.h"
-#include <stdlib.h>
-#include <arpa/inet.h>
 #include <libproc.h>
 
 
@@ -11,7 +8,7 @@ static char proc_name_buf[128];
 
 
 void error_handler(u_int64_t flags) {
-    if (flags & DIVERT_ERROR_DIVERT_NODATA) {
+    if (flags & DIVERT_ERROR_NODATA) {
         puts("Didn't read data from divert socket or data error.");
     }
     if (flags & DIVERT_ERROR_KQUEUE) {
@@ -37,7 +34,21 @@ char *adres(struct tuple4 addr) {
 }
 
 
-void tcp_callback(struct tcp_stream *a_tcp, void **this_time_not_needed) {
+void ip_callback(void *args, void *proc_info_p,
+                 struct ip *packet, struct sockaddr *sin) {
+    divert_t *handle = args;
+    // re-inject packets into TCP/IP stack
+    divert_reinject(handle, packet, -1, sin);
+}
+
+void tcp_callback(struct tcp_stream *a_tcp,
+                  void **not_needed, void *data) {
+    // if this is not the stream we're concerning about
+    // we just return and do nothing
+    if (tcp_stream_pid != pid &&
+        tcp_stream_epid != pid) {
+        return;
+    }
     char addr_buf[1024];
     strcpy (addr_buf, adres(a_tcp->addr)); // we put conn params into buf
     if (a_tcp->nids_state == NIDS_JUST_EST) {
@@ -48,43 +59,32 @@ void tcp_callback(struct tcp_stream *a_tcp, void **this_time_not_needed) {
         FILE *fp = fopen(addr_buf, "wb");
         fclose(fp);
         return;
-    }
-    if (a_tcp->nids_state == NIDS_CLOSE) {
+    } else if (a_tcp->nids_state == NIDS_CLOSE) {
         // connection has been closed normally
         fprintf(stderr, "%s closing\n", addr_buf);
         return;
-    }
-    if (a_tcp->nids_state == NIDS_RESET) {
+    } else if (a_tcp->nids_state == NIDS_RESET) {
         // connection has been closed by RST
         fprintf(stderr, "%s reset\n", addr_buf);
         return;
-    }
-
-    if (a_tcp->nids_state == NIDS_DATA) {
-        //fprintf(stderr, "Data of connection: %s\n", addr_buf);
+    } else if (a_tcp->nids_state == NIDS_DATA) {
         // new data has arrived
         // gotta determine in what direction
         struct half_stream *hlf;
-
         if (a_tcp->client.count_new) {
             // new data for client
             hlf = &a_tcp->client; // from now on, we will deal with hlf var,
         } else {
             hlf = &a_tcp->server; // analogical
         }
+        // and save the connection data into files
+        fprintf(stderr, "Save data of connection: %s\n", addr_buf);
         FILE *fp = fopen(addr_buf, "a");
         fwrite(hlf->data, 1, (size_t)hlf->count_new, fp);
         fclose(fp);
     }
     return;
 }
-
-#define MAX_PACKET_SIZE 65535
-
-u_char packet_buf[MAX_PACKET_SIZE + 10];
-u_char sin_buf[sizeof(struct sockaddr) + 10];
-u_char proc_info_buf[sizeof(proc_info_t) + 10];
-divert_t *handle;
 
 int main(int argc, char *argv[]) {
     if (argc == 2) {
@@ -95,14 +95,28 @@ int main(int argc, char *argv[]) {
     }
 
     proc_name(pid, proc_name_buf, sizeof(proc_name_buf));
-    printf("Watching packets of %s: %d\n", proc_name_buf, pid);
+    printf("Watching packets of process %s: %d\n", proc_name_buf, pid);
+
+    // first manually init libnids
+    divert_init_nids();
+
+    // register callback function for TCP connection
+    nids_register_tcp(tcp_callback);
 
     // create a handle for divert object
-    handle = divert_create(0, DIVERT_FLAG_BLOCK_IO |
-                              DIVERT_FLAG_TCP_REASSEM);
+    divert_t *handle = divert_create(0, DIVERT_FLAG_TCP_REASSEM);
 
     // set the error handler to display error information
     divert_set_error_handler(handle, error_handler);
+
+    // register callback function for IP packet
+    divert_set_callback(handle, ip_callback, handle);
+
+    // register signal handler to exit process gracefully
+    divert_set_signal_handler(SIGINT, divert_signal_handler_stop_loop, (void *)handle);
+
+    // update ipfw rule
+    divert_update_ipfw(handle, "tcp from any to not 0.0.0.255:24 via en0");
 
     // activate the divert handler
     divert_activate(handle);
@@ -111,28 +125,10 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // register signal handler to exit process gracefully
-    divert_set_signal_handler(SIGINT, divert_signal_handler_stop_loop, (void *)handle);
-
     printf("Packet buffer size: %zu\n", handle->bufsize);
 
-    // call the non-blocking main loop
-    printf("Divert Loop Start Status: %d\n", divert_loop(handle, -1));
-
-    // register callback function
-    nids_register_tcp(tcp_callback);
-
-    while (divert_is_looping(handle)) {
-        // read data from the divert handle
-        divert_read(handle,
-                    (proc_info_t *)proc_info_buf,
-                    (struct ip *)packet_buf,
-                    (struct sockaddr_in *)sin_buf);
-
-        // re-inject packets into TCP/IP stack
-        divert_reinject(handle, (struct ip *)packet_buf,
-                        -1, (struct sockaddr *)sin_buf);
-    }
+    // call the main loop
+    printf("Divert Loop Exit Status: %d\n", divert_loop(handle, -1));
 
     // clean the handle to release resources
     if (divert_close(handle) == 0) {

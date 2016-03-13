@@ -1,9 +1,6 @@
 cmake_minimum_required(VERSION 3.3)
 project(divert)
 
-# first build the libnids static library
-add_subdirectory(libnids)
-
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -fPIC")
 
 add_definitions(
@@ -50,11 +47,14 @@ if (NOT IOKIT)
     message(FATAL_ERROR "IOKit not found")
 endif()
 
-add_library(divert SHARED ${LIB_SOURCE_FILES})
-target_link_libraries(divert nids pcap net ${CORE_SERV} ${IOKIT})
-set_target_properties(divert PROPERTIES LINK_FLAGS -all_load SUFFIX ".so")
+# first build the libnids static library
+add_subdirectory(libnids)
 
-# below executables are demos
+add_library(divert SHARED ${LIB_SOURCE_FILES})
+target_link_libraries(divert PRIVATE nids pcap net ${CORE_SERV} ${IOKIT})
+set_property(TARGET divert APPEND PROPERTY LINK_FLAGS -all_load)
+set_target_properties(divert PROPERTIES SUFFIX ".so")
+
 add_subdirectory(demo)
 add_subdirectory(test)
 add_subdirectory(emulator)

@@ -19,10 +19,8 @@ extern "C" {
 #define KEXT_FAILURE        -1
 #define DIVERT_FAILURE      -2
 #define IPFW_FAILURE        -3
-#define DIVERT_BUF_FAILURE  -4
 #define CALLBACK_NOT_FOUND  -5
 #define PIPE_OPEN_FAILURE   -6
-#define NIDS_FAILURE        -7
 #define INVALID_FAILURE     -8
 
 /*
@@ -35,8 +33,6 @@ extern "C" {
 #define TIMER_QUEUE_SIZE        4096
 
 // some default buffer size
-// warning: PACKET_BUFFER_SIZE should never be greater than SEM_VALUE_MAX
-#define PACKET_BUFFER_SIZE      8192
 #define PIPE_BUFFER_SIZE        32
 #define DIVERT_ERRBUF_SIZE      256
 #define DIVERT_DEFAULT_BUFSIZE  524288
@@ -51,7 +47,6 @@ extern "C" {
 /*
  * flags for packet buffer and error handling
  */
-#define DIVERT_RAW_IP_PACKET        (1u)
 #define DIVERT_ERROR_NODATA         (1u << 1)
 #define DIVERT_ERROR_KQUEUE         (1u << 2)
 #define DIVERT_ERROR_INVALID_IP     (1u << 3)
@@ -173,6 +168,8 @@ int divert_query_proc_by_packet(divert_t *handle,
 
 struct tcp_stream *
         divert_find_tcp_stream(struct ip *ip_hdr);
+
+int divert_init_nids();
 
 int divert_init_pcap(FILE *fp);
 

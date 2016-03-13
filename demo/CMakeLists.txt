@@ -1,8 +1,3 @@
-cmake_minimum_required(VERSION 3.3)
-project(demo)
-
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -fPIC -O2")
-
 # below executables are demos
 
 add_executable(packet_by_pid packet_by_pid.c)

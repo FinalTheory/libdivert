@@ -19,12 +19,9 @@
 #include "nids.h"
 #define TUPLE4
 #include "KernFunc.h"
-#include "print_packet.h"
 
 int time_greater_than(struct timeval *a,
                       struct timeval *b);
-
-extern pid_t tcp_stream_pid, tcp_stream_epid;
 
 static volatile int ipfw_rule_index = DEFAULT_IPFW_RULE_ID;
 
@@ -404,6 +401,25 @@ int divert_dump_pcap(struct ip *packet, FILE *fp) {
     return 0;
 }
 
+int divert_init_nids() {
+    static char init_flag = 0;
+    if (init_flag) { return 0; }
+
+    nids_params.n_tcp_streams = NUM_TCP_STREAMS;
+    nids_params.scan_num_ports = 0;
+
+    // when packets are diverted before sending,
+    // the checksum of that packet is not calculated
+    // because of the checksum offload mechanism
+    // so we need to disable that procedure
+    struct nids_chksum_ctl *chksum_ctl =
+            calloc(1, sizeof(struct nids_chksum_ctl));
+    chksum_ctl->action = NIDS_DONT_CHKSUM;
+    nids_register_chksum_ctl(chksum_ctl, 1);
+    init_flag = 1;
+    return nids_init();
+}
+
 int divert_activate(divert_t *divert_handle) {
     // clean error message
     divert_handle->errmsg[0] = 0;
@@ -440,27 +456,6 @@ int divert_activate(divert_t *divert_handle) {
         pipe(divert_handle->exit_fd) != 0) {
         sprintf(divert_handle->errmsg, "Could not create pipe: %s", strerror(errno));
         return PIPE_OPEN_FAILURE;
-    }
-
-    /*
-     * init for TCP reassemble
-     */
-    nids_params.n_tcp_streams = NUM_TCP_STREAMS;
-    nids_params.scan_num_ports = 0;
-
-    // when packets are diverted before sending,
-    // the checksum of that packet is not calculated
-    // because of the checksum offload mechanism
-    // so we need to disable that procedure
-    struct nids_chksum_ctl *chksum_ctl =
-            divert_mem_alloc(divert_handle->pool,
-                             sizeof(struct nids_chksum_ctl));
-    memset(chksum_ctl, 0, sizeof(struct nids_chksum_ctl));
-    chksum_ctl->action = NIDS_DONT_CHKSUM;
-    nids_register_chksum_ctl(chksum_ctl, 1);
-    if (!nids_init()) {
-        strcpy(divert_handle->errmsg, nids_errbuf);
-        return NIDS_FAILURE;
     }
 
     return 0;
@@ -617,13 +612,7 @@ int divert_loop(divert_t *divert_handle, int count) {
                             if (divert_handle->flags & DIVERT_FLAG_TCP_REASSEM) {
                                 tcp_stream_pid = proc_info.pid;
                                 tcp_stream_epid = proc_info.epid;
-                                size_t ip_len = ntohs(packet_hdrs.ip_hdr->ip_len);
-                                struct ip *ip_packet = divert_mem_alloc(divert_handle->pool, ip_len);
-                                memcpy(ip_packet, packet_hdrs.ip_hdr, ip_len);
-                                divert_checksum(ip_packet);
-                                divert_feed_nids(ip_packet);
-                                divert_mem_free(divert_handle->pool, ip_packet);
-                                //divert_print_packet(stderr, ~0u, &packet_hdrs, NULL);
+                                divert_feed_nids(packet_hdrs.ip_hdr);
                             }
 
                             // then call the callback function
