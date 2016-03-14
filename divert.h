@@ -39,8 +39,6 @@ extern "C" {
 
 /*
  * flags to control divert behaviour
- * you can choose to use extended information
- * or just divert the raw IP packets
  */
 #define DIVERT_FLAG_TCP_REASSEM  1u
 
