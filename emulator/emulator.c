@@ -463,16 +463,16 @@ int emulator_config_check(emulator_config_t *config, char *errmsg) {
                     break;
                 case PIPE_DROP: {
                     drop_pipe_t *pipe = container_of(cur, drop_pipe_t, node);
-                    t = pipe->t;
                     val = pipe->drop_rate;
                 }
                 case PIPE_DELAY: {
                     delay_pipe_t *pipe = container_of(cur, delay_pipe_t, node);
-                    if (pipe->delay_time == NULL) {
-                        sprintf(errmsg, "Delay data not set.");
+                    val = pipe->delay_time;
+                }
+                    if (val == NULL) {
+                        sprintf(errmsg, "Emulation data not set.");
                         return -1;
                     }
-                }
                     break;
                 case PIPE_DISORDER: {
                     disorder_pipe_t *pipe = container_of(cur, disorder_pipe_t, node);

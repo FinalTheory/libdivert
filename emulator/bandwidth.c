@@ -29,8 +29,8 @@ bandwidth_pipe_insert(pipe_node_t *node,
                                             &node->tv_start) * 1024.;
 
         // calculate the desired send time
-        size_t size_payload = packet->headers.size_payload;
-        double time_delta = (double)size_payload / bandwidth;
+        size_t size_data = ntohs(packet->ip_data->ip_len);
+        double time_delta = (double)size_data / bandwidth;
         struct timeval time_send = pipe->prev_send;
         time_add(&time_send, time_delta);
 

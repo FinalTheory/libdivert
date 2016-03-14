@@ -1,5 +1,4 @@
 #include "drop.h"
-#include <string.h>
 
 
 static void
@@ -13,10 +12,21 @@ drop_pipe_insert(pipe_node_t *node,
         if (packet->label != NEW_PACKET) { break; }
         if (!is_effect_applied(node->size_filter,
                                packet->headers.size_payload)) { break; }
-        if (calc_val_by_time(pipe->t,
-                             pipe->drop_rate,
-                             node->num, &node->p,
-                             &node->tv_start) < rand_double()) { break; }
+        double drop_rate;
+        if (pipe->t != NULL) {
+            // time driven mode:
+            // drop rate is calculated by a function
+            drop_rate = calc_val_by_time(pipe->t,
+                                         pipe->drop_rate,
+                                         node->num, &node->p,
+                                         &node->tv_start);
+        } else {
+            // event driven mode:
+            // drop rate is specified for each packet
+            drop_rate = pipe->drop_rate[node->p];
+            node->p = (node->p + 1) % node->num;
+        }
+        if (drop_rate < rand_double()) { break; }
         // just drop this packet, free the memory
         // as if we did not receive this packet
         divert_mem_free(config->pool, packet->ip_data);
@@ -42,7 +52,11 @@ drop_pipe_create(packet_size_filter *filter,
     drop_pipe_t *pipe = calloc(1, sizeof(drop_pipe_t));
     pipe_node_t *node = &pipe->node;
 
-    MALLOC_AND_COPY(pipe->t, t, num, float)
+    if (t != NULL) {
+        MALLOC_AND_COPY(pipe->t, t, num, float)
+    } else {
+        pipe->t = NULL;
+    }
     MALLOC_AND_COPY(pipe->drop_rate, drop_rate, num, float)
 
     node->pipe_type = PIPE_DROP;
