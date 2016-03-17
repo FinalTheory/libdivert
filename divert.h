@@ -30,7 +30,7 @@ extern "C" {
 #define DEFAULT_IPFW_RULE_ID    1
 #define MAX_EVENT_COUNT         16
 #define NUM_TCP_STREAMS         2048
-#define TIMER_QUEUE_SIZE        4096
+#define TIMER_QUEUE_SIZE        1048576
 
 // some default buffer size
 #define PIPE_BUFFER_SIZE        32
