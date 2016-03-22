@@ -1,5 +1,4 @@
 #include "reinject.h"
-#include "emulator.h"
 
 
 static void

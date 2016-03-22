@@ -147,10 +147,10 @@ void emulator_process(emulator_config_t *config,
                       emulator_packet_t *packet) {
     pipe_node_t *node = NULL;
 
-    // check the label of this packet
+    // check the direction of this packet
     // and take corresponding actions
     int dir = packet->direction;
-    if (packet->label == NEW_PACKET) {
+    if (config->pipe[dir] != NULL) {
         // insert packet into first pipe
         config->pipe[dir]->insert(config->pipe[dir], packet);
         // process each pipe if it has process function
@@ -158,16 +158,6 @@ void emulator_process(emulator_config_t *config,
              node = node->next) {
             if (NULL != node->process) {
                 node->process(node);
-            }
-        }
-    } else if (packet->label == TIMEOUT_EVENT) {
-        if (config->pipe[dir] != NULL) {
-            config->pipe[dir]->insert(config->pipe[dir], packet);
-            for (node = config->pipe[dir]; node;
-                 node = node->next) {
-                if (NULL != node->process) {
-                    node->process(node);
-                }
             }
         }
     }
