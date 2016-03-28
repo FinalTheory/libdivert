@@ -1,4 +1,5 @@
 #include <divert.h>
+#include <assert.h>
 #include "emulator.h"
 #include "dump_packet.h"
 #include "throttle.h"
@@ -47,6 +48,20 @@ time_add(struct timeval *tv, double time) {
     }
 }
 
+inline ssize_t
+upper_bound(float *arr, size_t left, size_t right, double val) {
+    ssize_t result = -1;
+    while (left < right) {
+        size_t mid = (left + right) / 2;
+        if (arr[mid] > val) {
+            result = right = mid;
+        } else {
+            left = mid + 1;
+        }
+    }
+    return result;
+}
+
 inline double
 calc_val_by_time(float *t, float *val,
                  ssize_t n, ssize_t *p,
@@ -73,9 +88,17 @@ calc_val_by_time(float *t, float *val,
         *p = 0;
     }
     // find a time point just after current time
+    int loop_cnt = 0;
     while (t[*p] <= t_now) {
         (*p)++;
+        loop_cnt++;
+        if (loop_cnt >= 8) {
+            *p = upper_bound(t, 0, (size_t)n, t_now);
+            break;
+        }
     }
+    assert((*p >= 0 && *p < n));
+    assert(t[*p] > t_now);
     // rewind back a step
     if (*p > 0) { (*p)--; }
     // linear interpolate
@@ -224,7 +247,8 @@ void emulator_callback(void *args, void *proc,
      * if this packet is from unknown PID
      * then we must record it first
      */
-    if (pid == -1 && (config->flags & EMULATOR_DUMP_PCAP)) {
+    if (!match_device && pid == -1 &&
+        (config->flags & EMULATOR_DUMP_PCAP)) {
         divert_dump_pcap(ip_data, config->dump_unknown);
     }
 
