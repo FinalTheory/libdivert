@@ -270,7 +270,11 @@ void emulator_callback(void *args, void *proc,
      * packet dump stage
      */
     if (config->flags & EMULATOR_DUMP_PCAP) {
-        divert_dump_pcap(ip_data, config->dump_normal);
+        if (direction == DIRECTION_IN) {
+            divert_dump_pcap(ip_data, config->dump_server);
+        } else if (direction == DIRECTION_OUT) {
+            divert_dump_pcap(ip_data, config->dump_client);
+        }
     }
 
     /*
@@ -345,8 +349,8 @@ void emulator_destroy_config(emulator_config_t *config) {
         // close .pcap files
         if (config->flags & EMULATOR_DUMP_PCAP) {
             CHECK_AND_FREE(config->dump_path)
-            fclose(config->dump_normal);
-            fclose(config->dump_affected);
+            fclose(config->dump_client);
+            fclose(config->dump_server);
             fclose(config->dump_unknown);
         }
 
@@ -388,9 +392,9 @@ void emulator_set_dump_pcap(emulator_config_t *config,
     // this malloc should be freed
     char *filename = malloc(path_len + 32);
     strcpy(filename, dump_path);
-    strcat(filename, "/capture_normal.pcap");
-    config->dump_normal = fopen(filename, "wb");
-    divert_init_pcap(config->dump_normal);
+    strcat(filename, "/capture_client.pcap");
+    config->dump_client = fopen(filename, "wb");
+    divert_init_pcap(config->dump_client);
 
     strcpy(filename, dump_path);
     strcat(filename, "/capture_unknown.pcap");
@@ -398,9 +402,9 @@ void emulator_set_dump_pcap(emulator_config_t *config,
     divert_init_pcap(config->dump_unknown);
 
     strcpy(filename, dump_path);
-    strcat(filename, "/capture_affected.pcap");
-    config->dump_affected = fopen(filename, "wb");
-    divert_init_pcap(config->dump_affected);
+    strcat(filename, "/capture_server.pcap");
+    config->dump_server = fopen(filename, "wb");
+    divert_init_pcap(config->dump_server);
 
     free(filename);
     config->flags |= EMULATOR_DUMP_PCAP;
@@ -528,8 +532,8 @@ int emulator_config_check(emulator_config_t *config, char *errmsg) {
 
     if (config->flags & EMULATOR_DUMP_PCAP) {
         if (config->dump_path == NULL ||
-            config->dump_normal == NULL ||
-            config->dump_affected == NULL ||
+            config->dump_client == NULL ||
+            config->dump_server == NULL ||
             config->dump_unknown == NULL) {
             sprintf(errmsg, "NULL pointers when dump .pcap file.");
             return -1;

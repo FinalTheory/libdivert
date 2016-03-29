@@ -116,21 +116,22 @@ struct pipe_node {
 };
 
 struct emulator {
-    uint64_t flags;                 // only in callback function and config set, safe
+    uint64_t flags;
     divert_mem_pool_t *pool;
 
     /*
      * initialized by emulator_set_dump_pcap()
      */
-    char *dump_path;                // only use in config set, safe
-    FILE *dump_normal;              // these are accessed after initialize, safe
+    char *dump_path;
+    FILE *dump_client;
+    FILE *dump_server;
     FILE *dump_unknown;
-    FILE *dump_affected;
 
     /*
      * initialized by emulator_set_pid_list()
      */
-    ssize_t num_pid;                // ensured to be accessed after set
+    // ensured to be accessed after set
+    ssize_t num_pid;
     pid_t *pid_list;
 
     /*

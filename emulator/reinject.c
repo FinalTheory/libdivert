@@ -16,8 +16,13 @@ reinject_pipe_insert(pipe_node_t *node,
     config->dsize[packet->direction] += packet->headers.size_payload;
     // dump this packet if needed
     if (config->flags & EMULATOR_DUMP_PCAP) {
-        divert_dump_pcap(packet->ip_data,
-                         config->dump_affected);
+        if (packet->direction == DIRECTION_IN) {
+            divert_dump_pcap(packet->ip_data,
+                             config->dump_client);
+        } else if (packet->direction == DIRECTION_OUT) {
+            divert_dump_pcap(packet->ip_data,
+                             config->dump_server);
+        }
     }
     // and free this memory
     divert_mem_free(config->pool, packet->ip_data);
