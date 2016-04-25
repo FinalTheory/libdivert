@@ -34,9 +34,16 @@ bandwidth_pipe_insert(pipe_node_t *node,
         struct timeval time_send = pipe->prev_send;
         time_add(&time_send, time_delta);
 
-        // see if we should send this packet right now
         gettimeofday(&time_now, &tz);
-        if (time_greater_than(&time_now, &time_send)) { break; }
+        // see if we should send this packet right now
+        // send this packet only when buffer is empty
+        // to avoid packet reordering
+        // because the time resolution of kevent is not high enough
+        // we can not guarantee that those packets which are planned
+        // to send before current packet is really sent out
+        // they may still in the queue
+        if (time_greater_than(&time_now, &time_send) &&
+            circ_buf_is_empty(pipe->buffer)) { break; }
 
         // if not, insert it into buffer
         bandwidth_packet_t *ptr =

@@ -60,6 +60,7 @@ enum {
     (DST) = malloc(sizeof(TYPE) * (NUM));      \
     memcpy((DST), (SRC), sizeof(TYPE) * (NUM));
 
+#define TV2DOUBLE(tv) (tv.tv_sec + ((double)tv.tv_sec) / 1000000.)
 
 typedef struct {
     struct ip *ip_data;
