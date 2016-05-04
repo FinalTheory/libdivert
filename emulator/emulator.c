@@ -1,5 +1,7 @@
 #include <divert.h>
 #include <assert.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
 #include "emulator.h"
 #include "dump_packet.h"
 #include "throttle.h"
@@ -48,7 +50,7 @@ time_add(struct timeval *tv, double time) {
     }
 }
 
-inline ssize_t
+ssize_t
 upper_bound(float *arr, size_t left, size_t right, double val) {
     ssize_t result = -1;
     while (left < right) {
@@ -123,7 +125,7 @@ check_pid_in_list(pid_t pid, pid_t *pid_list, ssize_t n) {
     return 0;
 }
 
-int is_effect_applied(packet_size_filter *filter,
+int apply_size_filter(packet_size_filter *filter,
                       size_t real_size) {
     // if not configured, apply the effects
     if (filter == NULL ||
@@ -146,6 +148,41 @@ int is_effect_applied(packet_size_filter *filter,
     }
     // for all other situation, apply the effects
     return 1;
+}
+
+int apply_ip_filter(packet_ip_filter *filter,
+                    packet_hdrs_t *headers) {
+    if (filter == NULL) { return 1; }
+    // extract port from packet
+    in_addr_t ip_src = headers->ip_hdr->ip_src.s_addr;
+    in_addr_t ip_dst = headers->ip_hdr->ip_dst.s_addr;
+    int port_src = -1;
+    int port_dst = -1;
+    if (headers->ip_hdr->ip_p == IPPROTO_TCP) {
+        port_src = ntohs(headers->tcp_hdr->th_sport);
+        port_dst = ntohs(headers->tcp_hdr->th_dport);
+    } else if (headers->ip_hdr->ip_p == IPPROTO_UDP) {
+        port_src = ntohs(headers->udp_hdr->uh_sport);
+        port_dst = ntohs(headers->udp_hdr->uh_dport);
+    } else {
+        // if protocol is not TCP or UDP
+        // then we only apply the filter when ports are ignored
+        if (filter->port_dst != -1 ||
+            filter->port_src != -1) {
+            return 0;
+        }
+    }
+    // the port number should match
+    // or if we don't care the port number
+    if ((port_src == filter->port_src || filter->port_src == -1) &&
+        (port_dst == filter->port_dst || filter->port_dst == -1)) {
+        // the ip address should match
+        if ((ip_src & filter->ip_src_mask) == filter->ip_src &&
+            (ip_dst & filter->ip_dst_mask) == filter->ip_dst) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void
@@ -410,6 +447,25 @@ void emulator_set_dump_pcap(emulator_config_t *config,
     config->flags |= EMULATOR_DUMP_PCAP;
 }
 
+packet_ip_filter *
+emulator_create_ip_filter(char *ip_src, char *ip_src_mask,
+                          char *ip_dst, char *ip_dst_mask,
+                          int port_src, int port_dst) {
+    packet_ip_filter *filter =
+            calloc(1, sizeof(packet_ip_filter));
+    char *str_arr[4] = {ip_src, ip_src_mask, ip_dst, ip_dst_mask};
+    in_addr_t *int_arr[4] = {&filter->ip_src, &filter->ip_src_mask,
+                             &filter->ip_dst, &filter->ip_dst_mask};
+    struct in_addr temp;
+    for (int i = 0; i < 4; i++) {
+        inet_aton(str_arr[i], &temp);
+        *int_arr[i] = temp.s_addr;
+    }
+    filter->port_src = port_src;
+    filter->port_dst = port_dst;
+    return filter;
+}
+
 packet_size_filter *
 emulator_create_size_filter(size_t num,
                             size_t *size,
@@ -426,6 +482,11 @@ void emulator_free_size_filter(packet_size_filter *filter) {
     if (filter == NULL) { return; }
     CHECK_AND_FREE(filter->rate)
     CHECK_AND_FREE(filter->size)
+    CHECK_AND_FREE(filter)
+}
+
+void emulator_free_ip_filter(packet_ip_filter *filter) {
+    if (filter == NULL) { return; }
     CHECK_AND_FREE(filter)
 }
 

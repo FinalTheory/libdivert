@@ -14,8 +14,12 @@ bandwidth_pipe_insert(pipe_node_t *node,
 
     do {
         if (packet->label != NEW_PACKET) { break; }
-        if (!is_effect_applied(node->size_filter,
+
+        if (!apply_ip_filter(node->ip_filter, &packet->headers)) { break; }
+
+        if (!apply_size_filter(node->size_filter,
                                packet->headers.size_payload)) { break; }
+
         // if buffer is full, just drop this packet
         if (circ_buf_is_full(pipe->buffer)) {
             divert_mem_free(config->pool, packet->ip_data);
@@ -113,6 +117,7 @@ bandwidth_pipe_clear(pipe_node_t *node) {
 
 static void
 bandwidth_pipe_free(pipe_node_t *node) {
+    emulator_free_ip_filter(node->ip_filter);
     emulator_free_size_filter(node->size_filter);
     bandwidth_pipe_t *pipe = container_of(node, bandwidth_pipe_t, node);
     CHECK_AND_FREE(pipe->t)
@@ -121,7 +126,8 @@ bandwidth_pipe_free(pipe_node_t *node) {
     CHECK_AND_FREE(pipe)
 }
 
-pipe_node_t *bandwidth_pipe_create(packet_size_filter *filter,
+pipe_node_t *bandwidth_pipe_create(packet_ip_filter *ip_filter,
+                                   packet_size_filter *size_filter,
                                    size_t num, float *t,
                                    float *bandwidth,
                                    size_t queue_size) {
@@ -143,7 +149,8 @@ pipe_node_t *bandwidth_pipe_create(packet_size_filter *filter,
 
     node->p = 0;
     node->num = num;
-    node->size_filter = filter;
+    node->ip_filter = ip_filter;
+    node->size_filter = size_filter;
 
     return node;
 }

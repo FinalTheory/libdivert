@@ -41,6 +41,7 @@ pipe_node_t *reinject_pipe_create(divert_t *handle) {
     node->clear = NULL;
     node->free = NULL;
 
+    node->ip_filter = NULL;
     node->size_filter = NULL;
 
     return node;

@@ -1,5 +1,4 @@
 #include "biterr.h"
-#include <string.h>
 
 static void
 biterr_pipe_insert(pipe_node_t *node,
@@ -14,8 +13,11 @@ biterr_pipe_insert(pipe_node_t *node,
         if (packet->label != NEW_PACKET) { break; }
         emulator_config_t *config = node->config;
 
-        if (!is_effect_applied(node->size_filter,
+        if (!apply_ip_filter(node->ip_filter, &packet->headers)) { break; }
+
+        if (!apply_size_filter(node->size_filter,
                                packet->headers.size_payload)) { break; }
+
         // only apply for packets with payload
         if (packet->headers.size_payload <= 0) { break; }
         if (calc_val_by_time(pipe->t,
@@ -46,6 +48,7 @@ biterr_pipe_insert(pipe_node_t *node,
 
 static void
 biterr_pipe_free(pipe_node_t *node) {
+    emulator_free_ip_filter(node->ip_filter);
     emulator_free_size_filter(node->size_filter);
     biterr_pipe_t *pipe = container_of(node, biterr_pipe_t, node);
     CHECK_AND_FREE(pipe->t)
@@ -53,7 +56,8 @@ biterr_pipe_free(pipe_node_t *node) {
     CHECK_AND_FREE(pipe)
 }
 
-pipe_node_t *biterr_pipe_create(packet_size_filter *filter,
+pipe_node_t *biterr_pipe_create(packet_ip_filter *ip_filter,
+                                packet_size_filter *size_filter,
                                 size_t num, float *t,
                                 float *biterr_rate,
                                 int max_flip) {
@@ -72,7 +76,8 @@ pipe_node_t *biterr_pipe_create(packet_size_filter *filter,
 
     node->p = 0;
     node->num = num;
-    node->size_filter = filter;
+    node->ip_filter = ip_filter;
+    node->size_filter = size_filter;
 
     return node;
 }

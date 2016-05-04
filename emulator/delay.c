@@ -33,9 +33,17 @@ delay_pipe_insert(pipe_node_t *node,
     do {
         if (packet->label != NEW_PACKET) { break; }
 
-        if (!is_effect_applied(node->size_filter,
+        if (!apply_ip_filter(node->ip_filter, &packet->headers)) { break; }
+
+        if (!apply_size_filter(node->size_filter,
                                packet->headers.size_payload)) { break; }
-        if (pqueue_is_full(pipe->delay_queue)) { break; }
+
+        // if buffer is full, just drop this packet
+        if (pqueue_is_full(pipe->delay_queue)) {
+            divert_mem_free(config->pool, packet->ip_data);
+            divert_mem_free(config->pool, packet);
+            return;
+        }
 
         double delay_time;
         if (pipe->t != NULL) {
@@ -122,6 +130,7 @@ delay_pipe_clear(pipe_node_t *node) {
 
 static void
 delay_pipe_free(pipe_node_t *node) {
+    emulator_free_ip_filter(node->ip_filter);
     emulator_free_size_filter(node->size_filter);
     delay_pipe_t *pipe = container_of(node, delay_pipe_t, node);
     CHECK_AND_FREE(pipe->t)
@@ -130,7 +139,8 @@ delay_pipe_free(pipe_node_t *node) {
     CHECK_AND_FREE(pipe)
 }
 
-pipe_node_t *delay_pipe_create(packet_size_filter *filter,
+pipe_node_t *delay_pipe_create(packet_ip_filter *ip_filter,
+                               packet_size_filter *size_filter,
                                size_t num, float *t,
                                float *delay_time,
                                size_t queue_size) {
@@ -154,7 +164,8 @@ pipe_node_t *delay_pipe_create(packet_size_filter *filter,
 
     node->p = 0;
     node->num = num;
-    node->size_filter = filter;
+    node->ip_filter = ip_filter;
+    node->size_filter = size_filter;
 
     return node;
 }

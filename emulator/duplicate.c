@@ -1,6 +1,4 @@
 #include "duplicate.h"
-#include "emulator.h"
-#include <string.h>
 
 
 static void
@@ -15,8 +13,12 @@ duplicate_pipe_insert(pipe_node_t *node,
      */
     do {
         if (packet->label != NEW_PACKET) { break; }
-        if (!is_effect_applied(node->size_filter,
+
+        if (!apply_ip_filter(node->ip_filter, &packet->headers)) { break; }
+
+        if (!apply_size_filter(node->size_filter,
                                packet->headers.size_payload)) { break; }
+
         if (calc_val_by_time(pipe->t,
                              pipe->dup_rate,
                              node->num, &node->p,
@@ -40,6 +42,7 @@ duplicate_pipe_insert(pipe_node_t *node,
 
 static void
 duplicate_pipe_free(pipe_node_t *node) {
+    emulator_free_ip_filter(node->ip_filter);
     emulator_free_size_filter(node->size_filter);
     duplicate_pipe_t *pipe = container_of(node, duplicate_pipe_t, node);
     CHECK_AND_FREE(pipe->t)
@@ -48,7 +51,8 @@ duplicate_pipe_free(pipe_node_t *node) {
 }
 
 pipe_node_t *
-duplicate_pipe_create(packet_size_filter *filter,
+duplicate_pipe_create(packet_ip_filter *ip_filter,
+                      packet_size_filter *size_filter,
                       size_t num, float *t,
                       float *dup_rate,
                       size_t max_duplicate) {
@@ -67,7 +71,8 @@ duplicate_pipe_create(packet_size_filter *filter,
 
     node->p = 0;
     node->num = num;
-    node->size_filter = filter;
+    node->ip_filter = ip_filter;
+    node->size_filter = size_filter;
 
     return node;
 }

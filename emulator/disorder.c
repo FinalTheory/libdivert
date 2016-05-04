@@ -1,5 +1,4 @@
 #include "disorder.h"
-#include <string.h>
 
 
 static int
@@ -25,11 +24,16 @@ disorder_pipe_insert(pipe_node_t *node,
     do {
         // do not process this packet if this is a timeout signal
         if (packet->label != NEW_PACKET) { break; }
-        // update packet counter
-        pipe->packet_cnt[packet->direction]++;
-        // then check packet size
-        if (!is_effect_applied(node->size_filter,
+
+        if (!apply_ip_filter(node->ip_filter, &packet->headers)) { break; }
+
+        if (!apply_size_filter(node->size_filter,
                                packet->headers.size_payload)) { break; }
+
+        // update packet counter
+        // Note: should we update this stamp before or after filters?
+        pipe->packet_cnt[packet->direction]++;
+
         // calculate rate
         if (calc_val_by_time(pipe->t,
                              pipe->disorder_rate,
@@ -96,6 +100,7 @@ disorder_pipe_clear(pipe_node_t *node) {
 
 static void
 disorder_pipe_free(pipe_node_t *node) {
+    emulator_free_ip_filter(node->ip_filter);
     emulator_free_size_filter(node->size_filter);
     disorder_pipe_t *pipe = container_of(node, disorder_pipe_t, node);
     CHECK_AND_FREE(pipe->t)
@@ -106,7 +111,8 @@ disorder_pipe_free(pipe_node_t *node) {
 }
 
 pipe_node_t *
-disorder_pipe_create(packet_size_filter *filter,
+disorder_pipe_create(packet_ip_filter *ip_filter,
+                     packet_size_filter *size_filter,
                      size_t num, float *t,
                      float *disorder_rate,
                      size_t queue_size,
@@ -130,7 +136,8 @@ disorder_pipe_create(packet_size_filter *filter,
 
     node->p = 0;
     node->num = num;
-    node->size_filter = filter;
+    node->ip_filter = ip_filter;
+    node->size_filter = size_filter;
 
     return node;
 }

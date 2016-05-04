@@ -11,7 +11,8 @@ typedef struct {
 } biterr_pipe_t;
 
 pipe_node_t *
-biterr_pipe_create(packet_size_filter *filter,
+biterr_pipe_create(packet_ip_filter *ip_filter,
+                   packet_size_filter *size_filter,
                    size_t num, float *t,
                    float *biterr_rate,
                    int max_flip);

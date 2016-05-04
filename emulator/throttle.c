@@ -50,8 +50,12 @@ throttle_pipe_insert(pipe_node_t *node,
     do {
         double delay_time;
         if (packet->label != NEW_PACKET) { break; }
-        if (!is_effect_applied(node->size_filter,
+
+        if (!apply_ip_filter(node->ip_filter, &packet->headers)) { break; }
+
+        if (!apply_size_filter(node->size_filter,
                                packet->headers.size_payload)) { break; }
+
         if ((delay_time = calc_do_throttle(pipe->t_start,
                                            pipe->t_end,
                                            node->num, &node->p,
@@ -118,6 +122,7 @@ throttle_pipe_clear(pipe_node_t *node) {
 
 static void
 throttle_pipe_free(pipe_node_t *node) {
+    emulator_free_ip_filter(node->ip_filter);
     emulator_free_size_filter(node->size_filter);
     throttle_pipe_t *pipe = container_of(node, throttle_pipe_t, node);
     circ_buf_destroy(pipe->throttle_queue);
@@ -127,7 +132,8 @@ throttle_pipe_free(pipe_node_t *node) {
 }
 
 pipe_node_t *
-throttle_pipe_create(packet_size_filter *filter,
+throttle_pipe_create(packet_ip_filter *ip_filter,
+                     packet_size_filter *size_filter,
                      size_t num,
                      float *t_start,
                      float *t_end,
@@ -147,7 +153,8 @@ throttle_pipe_create(packet_size_filter *filter,
 
     node->p = 0;
     node->num = num;
-    node->size_filter = filter;
+    node->ip_filter = ip_filter;
+    node->size_filter = size_filter;
 
     return node;
 }

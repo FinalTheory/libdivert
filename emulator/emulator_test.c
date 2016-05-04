@@ -69,19 +69,19 @@ int main(int argc, char *argv[]) {
             emulator_create_config(handle);
 
     pipe_node_t *throttle_pipe =
-            throttle_pipe_create(NULL, 8, throttle_start, throttle_end, 65535);
+            throttle_pipe_create(NULL, NULL, 8, throttle_start, throttle_end, 65535);
 
     pipe_node_t *drop_pipe =
-            drop_pipe_create(NULL, DATA_LEN, t, drop_rate);
+            drop_pipe_create(NULL, NULL, DATA_LEN, t, drop_rate);
 
     pipe_node_t *bandwidth_pipe =
-            bandwidth_pipe_create(NULL, 2, bandwidth_t, bandwidth_val, 8192);
+            bandwidth_pipe_create(NULL, NULL, 2, bandwidth_t, bandwidth_val, 8192);
 
     pipe_node_t *delay_pipe =
-            delay_pipe_create(NULL, DATA_LEN, t, delay_time, 65535);
+            delay_pipe_create(NULL, NULL, DATA_LEN, t, delay_time, 65535);
 
     pipe_node_t *disorder_pipe =
-            disorder_pipe_create(NULL, DATA_LEN, t, disorder_rate, 65535, 10);
+            disorder_pipe_create(NULL, NULL, DATA_LEN, t, disorder_rate, 65535, 10);
 
     emulator_set_pid_list(config, pids, 1);
 

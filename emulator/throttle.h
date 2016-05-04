@@ -15,7 +15,8 @@ typedef struct {
 } throttle_pipe_t;
 
 pipe_node_t *
-throttle_pipe_create(packet_size_filter *filter,
+throttle_pipe_create(packet_ip_filter *ip_filter,
+                     packet_size_filter *size_filter,
                      size_t num,
                      float *t_start,
                      float *t_end,

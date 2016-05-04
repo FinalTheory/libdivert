@@ -90,6 +90,15 @@ typedef struct {
     size_t num;
 } packet_size_filter;
 
+typedef struct {
+    in_addr_t ip_src;
+    in_addr_t ip_src_mask;
+    in_addr_t ip_dst;
+    in_addr_t ip_dst_mask;
+    int port_src;
+    int port_dst;
+} packet_ip_filter;
+
 struct pipe_node {
     /*
      * init when create
@@ -102,6 +111,7 @@ struct pipe_node {
 
     ssize_t p;
     ssize_t num;
+    packet_ip_filter *ip_filter;
     packet_size_filter *size_filter;
 
     /*
@@ -164,8 +174,11 @@ calc_val_by_time(float *t, float *val,
 
 void time_add(struct timeval *tv, double time);
 
-int is_effect_applied(packet_size_filter *filter,
+int apply_size_filter(packet_size_filter *filter,
                       size_t real_size);
+
+int apply_ip_filter(packet_ip_filter *filter,
+                    packet_hdrs_t *headers);
 
 void register_timer(pipe_node_t *node,
                     struct timeval *tv,
@@ -210,9 +223,16 @@ int emulator_config_check(emulator_config_t *config, char *errmsg);
 
 int emulator_is_running(emulator_config_t *config);
 
+packet_ip_filter *
+emulator_create_ip_filter(char *ip_src, char *ip_src_mask,
+                          char *ip_dst, char *ip_dst_mask,
+                          int32_t port_src, int32_t port_dst);
+
 packet_size_filter *
 emulator_create_size_filter(size_t num, size_t *size, float *rate);
 
 void emulator_free_size_filter(packet_size_filter *filter);
+
+void emulator_free_ip_filter(packet_ip_filter *filter);
 
 #endif //DIVERT_EMULATOR_CONFIG_H

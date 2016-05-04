@@ -10,8 +10,12 @@ drop_pipe_insert(pipe_node_t *node,
 
     do {
         if (packet->label != NEW_PACKET) { break; }
-        if (!is_effect_applied(node->size_filter,
+
+        if (!apply_ip_filter(node->ip_filter, &packet->headers)) { break; }
+
+        if (!apply_size_filter(node->size_filter,
                                packet->headers.size_payload)) { break; }
+
         double drop_rate;
         if (pipe->t != NULL) {
             // time driven mode:
@@ -38,6 +42,7 @@ drop_pipe_insert(pipe_node_t *node,
 
 static void
 drop_pipe_free(pipe_node_t *node) {
+    emulator_free_ip_filter(node->ip_filter);
     emulator_free_size_filter(node->size_filter);
     drop_pipe_t *pipe = container_of(node, drop_pipe_t, node);
     CHECK_AND_FREE(pipe->t)
@@ -46,7 +51,8 @@ drop_pipe_free(pipe_node_t *node) {
 }
 
 pipe_node_t *
-drop_pipe_create(packet_size_filter *filter,
+drop_pipe_create(packet_ip_filter *ip_filter,
+                 packet_size_filter *size_filter,
                  size_t num, float *t,
                  float *drop_rate) {
     drop_pipe_t *pipe = calloc(1, sizeof(drop_pipe_t));
@@ -67,7 +73,8 @@ drop_pipe_create(packet_size_filter *filter,
 
     node->p = 0;
     node->num = num;
-    node->size_filter = filter;
+    node->ip_filter = ip_filter;
+    node->size_filter = size_filter;
 
     return node;
 }
